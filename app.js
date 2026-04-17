@@ -15,12 +15,13 @@ import { getFirestore, doc, getDoc, setDoc }
 // 🔧 FILL THIS IN — from Firebase Console → Project Settings → Your Apps
 // =====================================================
 const FIREBASE_CONFIG = {
-  apiKey:            "YOUR_API_KEY",
-  authDomain:        "YOUR_PROJECT_ID.firebaseapp.com",
-  projectId:         "YOUR_PROJECT_ID",
-  storageBucket:     "YOUR_PROJECT_ID.appspot.com",
-  messagingSenderId: "YOUR_SENDER_ID",
-  appId:             "YOUR_APP_ID"
+  apiKey:            "AIzaSyBf8Poylq_Ifcb4Lk9bhDzT_D_M1XD8tYw",
+  authDomain:        "daily-bao.firebaseapp.com",
+  projectId:         "daily-bao",
+  storageBucket:     "daily-bao.firebasestorage.app",
+  messagingSenderId: "789462890967",
+  appId:             "1:789462890967:web:a40802ab38959ae5533392",
+  measurementId:     "G-RF7C9QC6GR"
 };
 
 // =====================================================
