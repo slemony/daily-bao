@@ -137,20 +137,29 @@ function showApp(user) {
 // FIRESTORE — USER FEEDS
 // =====================================================
 async function loadUserFeeds() {
-  const ref = doc(db, 'users', currentUser.uid);
-  const snap = await getDoc(ref);
-  if (snap.exists()) {
-    userFeeds = snap.data().feeds || DEFAULT_FEEDS;
-  } else {
+  try {
+    const ref = doc(db, 'users', currentUser.uid);
+    const snap = await getDoc(ref);
+    if (snap.exists()) {
+      userFeeds = snap.data().feeds || DEFAULT_FEEDS;
+    } else {
+      userFeeds = [...DEFAULT_FEEDS];
+      await saveUserFeeds();
+    }
+  } catch (e) {
+    console.warn('Firestore unavailable, using defaults:', e.message);
     userFeeds = [...DEFAULT_FEEDS];
-    await saveUserFeeds();
   }
   renderFeedList();
 }
 
 async function saveUserFeeds() {
-  const ref = doc(db, 'users', currentUser.uid);
-  await setDoc(ref, { feeds: userFeeds }, { merge: true });
+  try {
+    const ref = doc(db, 'users', currentUser.uid);
+    await setDoc(ref, { feeds: userFeeds }, { merge: true });
+  } catch (e) {
+    console.warn('Could not save feeds:', e.message);
+  }
 }
 
 // =====================================================
