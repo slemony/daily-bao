@@ -592,8 +592,9 @@ async function openReader(article) {
 
     readerContent.innerHTML = `
       <h1>${esc(parsed.title || article.title)}</h1>
-      ${parsed.byline ? `<p style="font-size:0.8rem;color:var(--text-dim);margin-bottom:1.25rem">${esc(parsed.byline)}</p>` : ''}
-      <div>${parsed.content}</div>
+      ${parsed.byline ? `<p class="reader-byline">${esc(parsed.byline)}</p>` : ''}
+      <hr class="reader-rule">
+      <div class="reader-prose">${parsed.content}</div>
     `;
 
     readerLoading.classList.add('hidden');
