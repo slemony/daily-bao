@@ -590,11 +590,15 @@ async function openReader(article) {
 
     document.getElementById('reader-time').textContent = `· ~${readMins} min read`;
 
+    const sample = (parsed.textContent || '').slice(0, 200);
+    const isCJK = /[\u3400-\u9fff\uf900-\ufaff\u3040-\u30ff\uac00-\ud7af]/.test(sample);
+    const proseClass = isCJK ? 'reader-prose is-cjk' : 'reader-prose';
+
     readerContent.innerHTML = `
       <h1>${esc(parsed.title || article.title)}</h1>
       ${parsed.byline ? `<p class="reader-byline">${esc(parsed.byline)}</p>` : ''}
       <hr class="reader-rule">
-      <div class="reader-prose">${parsed.content}</div>
+      <div class="${proseClass}">${parsed.content}</div>
     `;
 
     readerLoading.classList.add('hidden');
