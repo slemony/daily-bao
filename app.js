@@ -98,6 +98,7 @@ const CORS_PROXIES = [
   url => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
   url => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
   url => `https://api.cors.lol/?url=${encodeURIComponent(url)}`,
+  url => `https://corsproxy.io/?${encodeURIComponent(url)}`,
 ];
 
 const feedLogs = [];
@@ -365,16 +366,25 @@ function parseRss2json(json, feed) {
 async function fetchFeed(feed) {
   try {
     const xml = await corsGet(feed.url);
+    if (/^\s*<!DOCTYPE\s+html/i.test(xml) || /^\s*<html/i.test(xml))
+      throw new Error('HTML response — Cloudflare block or wrong URL');
     return await parseRSS(xml, feed);
-  } catch { /* all XML proxies failed, try rss2json */ }
+  } catch (e) {
+    console.warn(`[DailyBao] CORS proxies failed for "${feed.name}":`, e?.message);
+  }
 
-  const r = await fetch(
-    `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(feed.url)}`,
-    { signal: AbortSignal.timeout(12000) }
-  );
-  const json = await r.json();
-  if (json.status === 'ok') return parseRss2json(json, feed);
-  throw new Error(`All sources failed for: ${feed.name}`);
+  try {
+    const r = await fetch(
+      `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(feed.url)}`,
+      { signal: AbortSignal.timeout(12000) }
+    );
+    const json = await r.json();
+    if (json.status === 'ok') return parseRss2json(json, feed);
+    console.warn(`[DailyBao] rss2json failed for "${feed.name}":`, json.message || json.status);
+    throw new Error(json.message || `rss2json status: ${json.status}`);
+  } catch (e) {
+    throw new Error(`All sources failed for: ${feed.name} — ${e?.message}`);
+  }
 }
 
 function sortArticles() {
