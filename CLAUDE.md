@@ -35,6 +35,30 @@ README.md        — setup guide for deploying to Firebase
 - **Firestore stores config only** — articles are never written to Firestore
 - **Single `app.js`** — all logic in one file intentionally; don't split unless it exceeds ~800 lines
 - **Theme persists via localStorage** — default is light (warm newspaper palette); user preference remembered across sessions
+- **Whole card is clickable** — article cards have no "Read →" button; clicking anywhere on the card opens the reader
+
+## Article card design (Reeder-style)
+Each `.article-card` shows:
+- Top row: circular favicon (Google favicon API `?domain=…&sz=64`), feed name, author (`item.creator` / `dc:creator`), date
+- Body row: title + summary (left, flex), thumbnail (right, 76×76px, `object-fit: cover`)
+- Thumbnail sourced from: YouTube thumbnail > media:thumbnail > first `<img src>` in content
+- `feedDomain` and `author` are extracted at parse time in `parseRSS()` / `parseRss2json()` and stored on each article object
+
+## Feed source filter
+- `activeFeed` global (null = show all) — set by clicking a feed's name in the settings panel
+- Clicking closes the panel and filters `renderFeed()` to that feed's articles only
+- A `#feed-filter-chip` below the lang-filter shows "Showing: [name] ✕"; clicking ✕ clears the filter
+- Active feed item is highlighted with `.feed-item-active` class
+
+## Settings panel — feed item actions
+- Edit and Delete buttons are hidden by default (`opacity: 0; pointer-events: none`)
+- **Desktop**: buttons fade in on `.feed-item:hover`
+- **Mobile**: long-press (600ms touchstart timer) adds `.actions-visible` class; tapping outside clears it
+- Clicking the feed name area filters by that feed (separate from the action buttons)
+
+## Reader image handling
+- `.reader-prose img` has `height: auto; width: auto` — prevents stretching from explicit HTML attributes
+- `cleanReaderContent()` strips inline `width`/`height` attributes and styles from all `<img>` tags after the lazy-load replacement pass
 
 ## Firebase config
 The `FIREBASE_CONFIG` object at the top of `app.js` is a placeholder. User fills it in from Firebase Console → Project Settings → Your Apps. Do not commit real API keys.
