@@ -1242,14 +1242,17 @@ button { cursor: pointer; font-family: var(--font-main); border: none; backgroun
 }
 .reader-prose a:hover { text-decoration-color: var(--accent); color: var(--accent); }
 
-/* CJK: disable justification (prevents awkward inter-glyph spacing) */
-.reader-prose:lang(zh),
-.reader-prose:lang(zh-Hans),
-.reader-prose:lang(zh-Hant),
-.reader-prose:lang(ja),
-.reader-prose:lang(ko) {
+/* CJK: disable justification (prevents awkward inter-glyph spacing),
+   shrink the drop cap so a full-em glyph doesn't dominate the page. */
+.reader-prose.is-cjk {
   text-align: left;
   hyphens: manual;
+}
+.reader-prose.is-cjk > p:first-child::first-letter {
+  font-size: 3em;
+  line-height: 1;
+  padding: 0.05em 0.12em 0 0;
+  margin-top: 0;
 }
 
 .reader-error {
