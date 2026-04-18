@@ -42,6 +42,40 @@ const DEFAULT_FEEDS = [
 ];
 
 // =====================================================
+// SPLASH MESSAGES (shown during Firebase auth check)
+// =====================================================
+const SPLASH_MSGS = [
+  "Boiling the news...",
+  "Untangling the internet...",
+  "Bribing the algorithm...",
+  "Removing 97% of rage bait...",
+  "Fact-checking the fact-checkers...",
+  "Translating 'source familiar with the matter'...",
+  "Filtering out hot takes... mostly failed...",
+  "Skimming so you don't have to...",
+  "Deleting the paywalls in our hearts...",
+  "Searching for good news... still searching...",
+  "Downloading today's anxiety... please wait...",
+  "Consulting the vibes...",
+  "Calibrating outrage levels...",
+  "Checking if the world is still on fire... yes...",
+  "Sorting headlines by chaos potential...",
+  "Asking 17 experts who disagree...",
+  "Converting doom into content...",
+  "Buffering your daily crisis...",
+  "Aggregating takes you didn't ask for...",
+  "Pretending to be unbiased...",
+];
+document.getElementById('splash-msg').textContent = SPLASH_MSGS[Math.floor(Math.random() * SPLASH_MSGS.length)];
+
+function hideSplash() {
+  const splash = document.getElementById('splash-screen');
+  if (!splash) return;
+  splash.classList.add('fade-out');
+  setTimeout(() => splash.remove(), 420);
+}
+
+// =====================================================
 // LOADING MESSAGES
 // =====================================================
 const LOADING_MSGS = [
@@ -82,14 +116,65 @@ let activeLang    = 'all';
 let readerOpen    = false;
 
 // =====================================================
+// ARTICLE CACHE (localStorage)
+// =====================================================
+const CACHE_KEY = 'dailybao_feed_cache';
+
+function isSameDay(ts) {
+  const d = new Date(ts), now = new Date();
+  return d.getFullYear() === now.getFullYear()
+      && d.getMonth()    === now.getMonth()
+      && d.getDate()     === now.getDate();
+}
+
+function loadCache(uid) {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    if (!raw) return null;
+    const c = JSON.parse(raw);
+    if (c.uid !== uid) return null;
+    // Re-hydrate date strings → Date objects
+    c.articles = c.articles.map(a => ({ ...a, date: a.date ? new Date(a.date) : null }));
+    return c;
+  } catch { return null; }
+}
+
+function saveCache() {
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify({
+      uid: currentUser.uid,
+      cachedAt: Date.now(),
+      articles: allArticles,
+    }));
+  } catch { /* storage full — fail silently */ }
+}
+
+// =====================================================
 // AUTH
 // =====================================================
 onAuthStateChanged(auth, async user => {
+  hideSplash();
   if (user) {
     currentUser = user;
     showApp(user);
     await loadUserFeeds();
-    await fetchAllFeeds();
+
+    const cache = loadCache(user.uid);
+    if (cache && isSameDay(cache.cachedAt)) {
+      // Fresh cache — show immediately, skip network
+      allArticles = cache.articles;
+      updateLastUpdated();
+      renderFeed();
+    } else {
+      // Stale or no cache — show stale instantly if available, then refresh silently
+      if (cache) {
+        allArticles = cache.articles;
+        renderFeed();
+        await fetchAllFeeds({ silent: true });
+      } else {
+        await fetchAllFeeds({ silent: false });
+      }
+    }
   } else {
     currentUser = null;
     showLogin();
@@ -167,13 +252,11 @@ async function saveUserFeeds() {
 // RSS FETCHING
 // =====================================================
 async function corsGet(url) {
-  for (const proxy of CORS_PROXIES) {
-    try {
-      const resp = await fetch(proxy(url), { signal: AbortSignal.timeout(12000) });
-      if (resp.ok) return await resp.text();
-    } catch { /* try next proxy */ }
-  }
-  throw new Error(`All proxies failed for: ${url}`);
+  const attempts = CORS_PROXIES.map(p =>
+    fetch(p(url), { signal: AbortSignal.timeout(8000) })
+      .then(r => r.ok ? r.text() : Promise.reject(new Error(`${r.status}`)))
+  );
+  return Promise.any(attempts).catch(() => { throw new Error(`All proxies failed for: ${url}`); });
 }
 
 function parseRSS(xmlText, feed) {
@@ -228,7 +311,7 @@ function parseRSS(xmlText, feed) {
     });
   });
 
-  return articles.slice(0, 8);
+  return articles.slice(0, 15);
 }
 
 async function fetchFeed(feed) {
@@ -241,26 +324,50 @@ async function fetchFeed(feed) {
   }
 }
 
-async function fetchAllFeeds() {
-  setLoadingState(true);
-  allArticles = [];
-
-  const results = await Promise.allSettled(userFeeds.map(fetchFeed));
-  results.forEach(r => {
-    if (r.status === 'fulfilled') allArticles.push(...r.value);
-  });
-
-  // Sort newest first
+function sortArticles() {
   allArticles.sort((a, b) => {
     if (!a.date && !b.date) return 0;
     if (!a.date) return 1;
     if (!b.date) return -1;
     return b.date - a.date;
   });
+}
 
-  updateLastUpdated();
-  setLoadingState(false);
-  renderFeed();
+async function fetchAllFeeds({ silent = false } = {}) {
+  if (!silent) setLoadingState(true);
+
+  // Deduplicate against existing articles
+  const seenUrls = new Set(allArticles.map(a => a.link));
+
+  let remaining = userFeeds.length;
+  let anyNew    = false;
+
+  const feedPromises = userFeeds.map(feed =>
+    fetchFeed(feed)
+      .then(articles => {
+        const fresh = articles.filter(a => !seenUrls.has(a.link));
+        if (fresh.length) {
+          fresh.forEach(a => seenUrls.add(a.link));
+          allArticles = [...fresh, ...allArticles];
+          sortArticles();
+          anyNew = true;
+          renderFeed();
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        remaining--;
+        if (remaining === 0) {
+          updateLastUpdated();
+          if (!silent) setLoadingState(false);
+          if (anyNew) saveCache();
+          // Warm up Readability so first article open is instant
+          import('https://cdn.jsdelivr.net/npm/@mozilla/readability@0.5.0/+esm').catch(() => {});
+        }
+      })
+  );
+
+  await Promise.allSettled(feedPromises);
 }
 
 // =====================================================
@@ -447,8 +554,14 @@ function renderFeedList() {
           ${esc(sectionLabel(feed.section))}
         </div>
       </div>
-      <button class="btn-remove" data-feed-id="${esc(feed.id)}" title="Remove">✕</button>
+      <div class="feed-item-actions">
+        <button class="btn-edit" data-feed-id="${esc(feed.id)}" title="Edit & test">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+        </button>
+        <button class="btn-remove" data-feed-id="${esc(feed.id)}" title="Remove">✕</button>
+      </div>
     `;
+    el.querySelector('.btn-edit').addEventListener('click', () => openEditFeed(feed.id));
     el.querySelector('.btn-remove').addEventListener('click', () => removeFeed(feed.id));
     list.appendChild(el);
   });
@@ -461,6 +574,72 @@ async function removeFeed(feedId) {
   allArticles = allArticles.filter(a => a.feedId !== feedId);
   renderFeed();
 }
+
+// =====================================================
+// EDIT FEED
+// =====================================================
+let editingFeedId = null;
+
+async function openEditFeed(feedId) {
+  const feed = userFeeds.find(f => f.id === feedId);
+  if (!feed) return;
+  editingFeedId = feedId;
+
+  document.getElementById('edit-feed-url').value     = feed.url;
+  document.getElementById('edit-feed-name').value    = feed.name;
+  document.getElementById('edit-feed-section').value = feed.section;
+  document.getElementById('edit-feed-lang').value    = feed.lang;
+
+  const results = document.getElementById('edit-test-results');
+  const status  = document.getElementById('edit-test-status');
+  results.innerHTML    = '<div class="test-loading">Fetching feed...</div>';
+  status.textContent   = '';
+  status.className     = 'detect-status';
+
+  openModal('edit-feed-modal');
+
+  try {
+    const xml      = await corsGet(feed.url);
+    const articles = parseRSS(xml, feed);
+    if (articles.length === 0) throw new Error('empty');
+
+    status.textContent = `✓ ${articles.length} articles found`;
+    status.className   = 'detect-status success';
+    results.innerHTML  = articles.slice(0, 3).map(a => `
+      <div class="test-article">
+        <div class="test-article-title">${esc(a.title)}</div>
+        ${a.date ? `<div class="test-article-date">${formatDate(a.date)}</div>` : ''}
+      </div>
+    `).join('');
+  } catch {
+    status.textContent = '✗ Could not fetch feed';
+    status.className   = 'detect-status error';
+    results.innerHTML  = '<div class="test-error">Feed may be unavailable or blocked by the CORS proxy.</div>';
+  }
+}
+
+document.getElementById('save-edit-btn').addEventListener('click', async () => {
+  if (!editingFeedId) return;
+  const idx = userFeeds.findIndex(f => f.id === editingFeedId);
+  if (idx === -1) return;
+
+  const newName = document.getElementById('edit-feed-name').value.trim();
+  userFeeds[idx] = {
+    ...userFeeds[idx],
+    name:    newName || userFeeds[idx].name,
+    section: document.getElementById('edit-feed-section').value,
+    lang:    document.getElementById('edit-feed-lang').value,
+  };
+
+  await saveUserFeeds();
+  renderFeedList();
+  renderFeed();
+  closeModal('edit-feed-modal');
+});
+
+document.getElementById('edit-feed-modal').addEventListener('click', e => {
+  if (e.target === document.getElementById('edit-feed-modal')) closeModal('edit-feed-modal');
+});
 
 // =====================================================
 // ADD FEED
@@ -651,7 +830,7 @@ document.getElementById('panel-backdrop').addEventListener('click', () => {
   hidePanelBackdrop();
 });
 
-document.getElementById('settings-btn').addEventListener('click', () => openPanel('settings-panel'));
+document.getElementById('user-btn').addEventListener('click', () => openPanel('settings-panel'));
 document.getElementById('reader-back-btn').addEventListener('click', () => closePanel('reader-panel'));
 
 // Close modal on backdrop click
@@ -686,7 +865,7 @@ document.querySelectorAll('.lang-btn').forEach(btn => {
 document.getElementById('refresh-btn').addEventListener('click', async () => {
   const btn = document.getElementById('refresh-btn');
   btn.classList.add('spinning');
-  await fetchAllFeeds();
+  await fetchAllFeeds({ silent: true });
   btn.classList.remove('spinning');
 });
 
@@ -694,11 +873,14 @@ document.getElementById('refresh-btn').addEventListener('click', async () => {
 // THEME TOGGLE
 // =====================================================
 const themeBtn = document.getElementById('theme-toggle');
-let isDark = true;
+let isDark = (localStorage.getItem('theme') ?? 'light') === 'dark';
+document.documentElement.dataset.theme = isDark ? 'dark' : 'light';
+themeBtn.textContent = isDark ? '☀️ Cope' : '🌙 Vibe';
 themeBtn.addEventListener('click', () => {
   isDark = !isDark;
   document.documentElement.dataset.theme = isDark ? 'dark' : 'light';
   themeBtn.textContent = isDark ? '☀️ Cope' : '🌙 Vibe';
+  localStorage.setItem('theme', isDark ? 'dark' : 'light');
 });
 
 // =====================================================
@@ -717,7 +899,10 @@ function setLoadingState(loading) {
 function updateLastUpdated() {
   const el = document.getElementById('last-updated');
   const now = new Date();
-  el.textContent = `Updated ${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}`;
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const hh = now.getHours().toString().padStart(2,'0');
+  const mm = now.getMinutes().toString().padStart(2,'0');
+  el.textContent = `Updated ${now.getDate()} ${months[now.getMonth()]}, ${hh}:${mm}`;
 }
 
 // =====================================================
