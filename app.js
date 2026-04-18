@@ -130,6 +130,7 @@ let userFeeds    = [];
 let allArticles  = [];    // flat array of fetched articles
 let activeSection = 'all';
 let activeLang    = 'all';
+let activeFeed    = null;
 let readerOpen    = false;
 
 // =====================================================
@@ -292,20 +293,30 @@ async function parseRSS(xmlText, feed) {
     let thumbnail = '';
     if (videoId) thumbnail = `https://img.youtube.com/vi/${videoId}/mqdefault.jpg`;
     if (item.mediaThumbnail) thumbnail = item.mediaThumbnail['$']?.url || thumbnail;
+    if (!thumbnail) {
+      const raw = item.contentEncoded || item.content || '';
+      const m = raw.match(/<img[^>]+src=["']([^"']+)["']/i);
+      if (m && !m[1].startsWith('data:')) thumbnail = m[1];
+    }
 
     const link = item.link || item.guid || '';
     const title = item.title || '';
     if (!title || !link) return null;
 
+    let feedDomain = '';
+    try { feedDomain = new URL(feed.url).hostname.replace(/^www\./, ''); } catch {}
+
     return {
       id:        `${feed.id}-${link}`,
       feedId:    feed.id,
       feedName:  feed.name,
+      feedDomain,
       lang:      feed.lang,
       section:   feed.section,
       title,
       summary,
       link,
+      author:    item.creator || item['dc:creator'] || item.author || '',
       date:      item.isoDate ? new Date(item.isoDate) : (item.pubDate ? new Date(item.pubDate) : null),
       videoId,
       thumbnail,
@@ -315,24 +326,37 @@ async function parseRSS(xmlText, feed) {
 }
 
 function parseRss2json(json, feed) {
+  let feedDomain = '';
+  try { feedDomain = new URL(feed.url).hostname.replace(/^www\./, ''); } catch {}
+
   return json.items.slice(0, 15).map(item => {
     const rawSummary = item.content || item.description || '';
     const summary = rawSummary.replace(/<[^>]*>/g, '').trim().slice(0, 200);
     const link = item.link || item.guid || '';
     const title = item.title || '';
     if (!title || !link) return null;
+
+    let thumbnail = item.thumbnail || '';
+    if (!thumbnail) {
+      const raw = item.content || item.description || '';
+      const m = raw.match(/<img[^>]+src=["']([^"']+)["']/i);
+      if (m && !m[1].startsWith('data:')) thumbnail = m[1];
+    }
+
     return {
       id:        `${feed.id}-${link}`,
       feedId:    feed.id,
       feedName:  feed.name,
+      feedDomain,
       lang:      feed.lang,
       section:   feed.section,
       title,
       summary,
       link,
+      author:    item.author || '',
       date:      item.pubDate ? new Date(item.pubDate) : null,
       videoId:   '',
-      thumbnail: item.thumbnail || '',
+      thumbnail,
       isCreator: feed.section === 'Creators',
     };
   }).filter(Boolean);
@@ -455,6 +479,24 @@ function renderFeed() {
   let articles = allArticles;
   if (activeSection !== 'all') articles = articles.filter(a => a.section === activeSection);
   if (activeLang !== 'all')    articles = articles.filter(a => a.lang === activeLang);
+  if (activeFeed)              articles = articles.filter(a => a.feedId === activeFeed);
+
+  // Update filter chip
+  const chip = document.getElementById('feed-filter-chip');
+  if (chip) {
+    if (activeFeed) {
+      const feed = userFeeds.find(f => f.id === activeFeed);
+      chip.innerHTML = `${esc(feed?.name || activeFeed)} <button class="chip-clear" aria-label="Clear filter">✕</button>`;
+      chip.classList.remove('hidden');
+      chip.querySelector('.chip-clear').addEventListener('click', () => {
+        activeFeed = null;
+        renderFeedList();
+        renderFeed();
+      });
+    } else {
+      chip.classList.add('hidden');
+    }
+  }
 
   if (articles.length === 0) {
     empty.classList.remove('hidden');
@@ -475,21 +517,30 @@ function buildArticleCard(a, i) {
   card.className = 'article-card';
   card.style.animationDelay = `${Math.min(i * 30, 400)}ms`;
 
+  const faviconUrl = a.feedDomain
+    ? `https://www.google.com/s2/favicons?domain=${encodeURIComponent(a.feedDomain)}&sz=64`
+    : '';
+  const thumbHtml = a.thumbnail
+    ? `<img class="card-thumb" src="${esc(a.thumbnail)}" alt="" loading="lazy" onerror="this.remove()">`
+    : '';
+
   card.innerHTML = `
-    <div class="card-meta">
-      <span class="section-dot" data-section="${esc(a.section)}"></span>
+    <div class="card-top">
+      ${faviconUrl ? `<img class="card-favicon" src="${esc(faviconUrl)}" alt="" loading="lazy" onerror="this.remove()">` : ''}
       <span class="card-source">${esc(a.feedName)}</span>
-      <span class="lang-badge" data-lang="${esc(a.lang)}">${esc(a.lang)}</span>
-      ${a.date ? `<span class="card-date">${formatDate(a.date)}</span>` : ''}
+      ${a.author ? `<span class="card-author">· ${esc(a.author)}</span>` : ''}
+      <span class="card-date-top">${a.date ? formatDate(a.date) : ''}</span>
     </div>
-    <div class="card-title">${esc(a.title)}</div>
-    ${a.summary ? `<div class="card-summary">${esc(a.summary)}</div>` : ''}
-    <div class="card-actions">
-      <button class="btn-read" data-article-id="${esc(a.id)}">Read →</button>
+    <div class="card-body-row">
+      <div class="card-text">
+        <div class="card-title">${esc(a.title)}</div>
+        ${a.summary ? `<div class="card-summary">${esc(a.summary)}</div>` : ''}
+      </div>
+      ${thumbHtml}
     </div>
   `;
 
-  card.querySelector('.btn-read').addEventListener('click', () => openReader(a));
+  card.addEventListener('click', () => openReader(a));
   return card;
 }
 
@@ -571,6 +622,14 @@ function cleanReaderContent(html, bylineText) {
       }
     }
     img.remove();
+  });
+
+  // Strip inline width/height from images so CSS can control proportions.
+  tpl.content.querySelectorAll('img').forEach(img => {
+    img.removeAttribute('width');
+    img.removeAttribute('height');
+    img.style.removeProperty('width');
+    img.style.removeProperty('height');
   });
 
   // Pass A: strip duplicate byline / preamble from the first 3 elements.
@@ -724,7 +783,7 @@ function renderFeedList() {
 
     feeds.forEach(feed => {
       const el = document.createElement('div');
-      el.className = 'feed-item';
+      el.className = 'feed-item' + (activeFeed === feed.id ? ' feed-item-active' : '');
       el.innerHTML = `
         <div class="feed-item-info">
           <div class="feed-item-name">${esc(feed.name)}</div>
@@ -739,8 +798,25 @@ function renderFeedList() {
           <button class="btn-remove" title="Remove">✕</button>
         </div>
       `;
-      el.querySelector('.btn-edit').addEventListener('click', () => openEditFeed(feed.id));
-      el.querySelector('.btn-remove').addEventListener('click', () => removeFeed(feed.id));
+
+      // Click the info area to filter by this feed
+      el.querySelector('.feed-item-info').addEventListener('click', () => {
+        activeFeed = activeFeed === feed.id ? null : feed.id;
+        renderFeed();
+        renderFeedList();
+        closePanel('settings-panel');
+      });
+
+      // Long-press on mobile to reveal edit/delete
+      let lpTimer = null;
+      el.addEventListener('touchstart', () => {
+        lpTimer = setTimeout(() => el.classList.add('actions-visible'), 600);
+      }, { passive: true });
+      el.addEventListener('touchend',  () => clearTimeout(lpTimer));
+      el.addEventListener('touchmove', () => clearTimeout(lpTimer));
+
+      el.querySelector('.btn-edit').addEventListener('click', (e) => { e.stopPropagation(); openEditFeed(feed.id); });
+      el.querySelector('.btn-remove').addEventListener('click', (e) => { e.stopPropagation(); removeFeed(feed.id); });
       details.appendChild(el);
     });
 
@@ -966,8 +1042,24 @@ document.getElementById('save-feed-btn').addEventListener('click', async () => {
     section,
   };
 
-  userFeeds.push(newFeed);
-  await saveUserFeeds();
+  const btn = document.getElementById('save-feed-btn');
+  const origLabel = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Saving…';
+
+  try {
+    userFeeds.push(newFeed);
+    await saveUserFeeds();
+  } catch (e) {
+    userFeeds = userFeeds.filter(f => f.id !== newFeed.id);
+    btn.disabled = false;
+    btn.textContent = origLabel;
+    alert('Could not save — check your connection and try again.');
+    return;
+  }
+
+  btn.disabled = false;
+  btn.textContent = origLabel;
   renderFeedList();
   closeModal('add-feed-modal');
   openPanel('settings-panel');
@@ -1110,6 +1202,13 @@ addSwipeToDismiss(document.getElementById('settings-panel'));
 document.getElementById('add-feed-modal').addEventListener('click', e => {
   if (e.target === document.getElementById('add-feed-modal')) closeModal('add-feed-modal');
 });
+
+// Clear long-press action reveal when tapping outside any feed item
+document.addEventListener('touchstart', e => {
+  if (!e.target.closest('.feed-item')) {
+    document.querySelectorAll('.feed-item.actions-visible').forEach(el => el.classList.remove('actions-visible'));
+  }
+}, { passive: true });
 
 // =====================================================
 // TABS & FILTERS

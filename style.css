@@ -504,6 +504,29 @@ button { cursor: pointer; font-family: var(--font-main); border: none; backgroun
 .lang-btn:hover { color: var(--text); }
 .lang-btn.active { background: var(--bg-hover); color: var(--text); border-color: var(--border-strong); }
 
+/* Feed source filter chip */
+.feed-filter-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0.75rem 0.4rem;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+.feed-filter-chip::before { content: 'Showing:'; color: var(--text-dim); font-size: 0.72rem; }
+.chip-clear {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 0.72rem;
+  cursor: pointer;
+  padding: 0 0.2rem;
+  line-height: 1;
+  border-radius: 50%;
+  transition: color var(--transition);
+}
+.chip-clear:hover { color: var(--text); }
+
 /* =====================================================
    FEED GRID
    ===================================================== */
@@ -547,7 +570,7 @@ button { cursor: pointer; font-family: var(--font-main); border: none; backgroun
   flex-direction: column;
   gap: 0.5rem;
   transition: all var(--transition);
-  cursor: default;
+  cursor: pointer;
   animation: card-fade-in 0.3s ease both;
 }
 @keyframes card-fade-in {
@@ -635,6 +658,50 @@ button { cursor: pointer; font-family: var(--font-main); border: none; backgroun
 }
 .btn-read:hover  { background: var(--accent); border-color: var(--accent); color: #fff; }
 .btn-watch:hover { background: var(--lang-yt); border-color: var(--lang-yt); color: #fff; }
+
+/* ARTICLE CARD — Reeder-style enriched layout */
+.card-top {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+.card-favicon {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  object-fit: cover;
+}
+.card-author {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 120px;
+}
+.card-date-top {
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.card-body-row {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+  min-height: 0;
+}
+.card-text { flex: 1; min-width: 0; }
+.card-thumb {
+  width: 76px;
+  height: 76px;
+  flex-shrink: 0;
+  border-radius: var(--radius-sm);
+  object-fit: cover;
+}
 
 /* CREATOR CARD (YouTube / XHS) */
 .creator-card {
@@ -825,7 +892,8 @@ button { cursor: pointer; font-family: var(--font-main); border: none; backgroun
   transition: border-color var(--transition);
 }
 .feed-item:hover { border-color: var(--border-strong); }
-.feed-item-info { flex: 1; min-width: 0; }
+.feed-item-active { border-color: var(--accent) !important; background: color-mix(in srgb, var(--accent) 8%, var(--bg-elevated)); }
+.feed-item-info { flex: 1; min-width: 0; cursor: pointer; }
 .feed-item-name {
   font-size: 0.82rem;
   font-weight: 600;
@@ -845,7 +913,20 @@ button { cursor: pointer; font-family: var(--font-main); border: none; backgroun
 }
 .btn-remove:hover { background: rgba(255,80,80,0.15); color: #ff5050; }
 
-.feed-item-actions { display: flex; gap: 0.2rem; align-items: center; flex-shrink: 0; }
+.feed-item-actions {
+  display: flex;
+  gap: 0.2rem;
+  align-items: center;
+  flex-shrink: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--transition);
+}
+.feed-item:hover .feed-item-actions,
+.feed-item.actions-visible .feed-item-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
 
 .btn-edit {
   width: 24px; height: 24px;
@@ -1217,6 +1298,8 @@ button { cursor: pointer; font-family: var(--font-main); border: none; backgroun
 /* Images & figures */
 .reader-prose img {
   max-width: 100%;
+  height: auto;
+  width: auto;
   border-radius: var(--radius-sm);
   margin: 1.5rem 0 0.5rem;
   display: block;
