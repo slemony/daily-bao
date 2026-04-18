@@ -8,7 +8,8 @@ A personal news reader web app that replaces social media. Free, cloud-hosted on
 - **Auth**: Firebase Auth — Google Sign-in only
 - **Database**: Firestore — stores per-user feed config (`/users/{uid}` → `{ feeds: [...] }`)
 - **Hosting**: Firebase Hosting (`firebase deploy`)
-- **RSS fetching**: Client-side via CORS proxies (api.allorigins.win, api.codetabs.com, api.cors.lol) — raced in parallel with `Promise.any`, 8s timeout
+- **RSS fetching**: Client-side — direct fetch + 3 CORS proxies (allorigins, codetabs, cors.lol) raced with `Promise.any`, 8s timeout; rss2json.com as final fallback if all fail
+- **RSS parsing**: `rss-parser@3` loaded from jsDelivr CDN (global `RSSParser`); handles `content:encoded`, Atom `<content>`, CDATA, Media RSS
 - **Article reader**: Mozilla Readability.js loaded from jsDelivr CDN (preloaded silently after first feed fetch)
 - **Article cache**: `localStorage` key `dailybao_feed_cache` — same-day cache, stale-while-revalidate on new day
 
@@ -50,6 +51,12 @@ The `FIREBASE_CONFIG` object at the top of `app.js` is a placeholder. User fills
 ## YouTube & XHS support
 - YouTube: standard Atom feed `https://www.youtube.com/feeds/videos.xml?channel_id=CHANNEL_ID`
 - XHS: via RSSHub public instance `https://rsshub.app/xiaohongshu/user/{userid}`
+- XHS URL auto-detection handles: `xiaohongshu.com/user/profile/{id}`, `rednote.com/user/profile/{id}`, `xhslink.com/m/{short}` (phone share — resolved via allorigins redirect)
+
+## Feed debug log
+- `feedLogs` array in `app.js` records per-feed OK/error with timestamp on every fetch
+- Accessible via Settings → Feed Logs → View, or by clicking the `⚠ N feeds failed` chip in the header
+- `openDebugModal()` renders the log; `updateLogsSummary()` updates the settings hint text
 
 ## UI personality / copy to preserve
 - Splash screen silly one-liners (`SPLASH_MSGS` array in app.js) — add more, never remove

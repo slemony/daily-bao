@@ -100,6 +100,23 @@ const CORS_PROXIES = [
   url => `https://api.cors.lol/?url=${encodeURIComponent(url)}`,
 ];
 
+const feedLogs = [];
+function logFeed(name, status, message) {
+  const now = new Date();
+  const t = `${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}:${now.getSeconds().toString().padStart(2,'0')}`;
+  feedLogs.push({ name, status, message, time: t });
+}
+
+const rssParser = new RSSParser({
+  customFields: {
+    item: [
+      ['content:encoded', 'contentEncoded'],
+      ['media:thumbnail', 'mediaThumbnail'],
+      ['yt:videoId', 'ytVideoId'],
+    ],
+  },
+});
+
 // =====================================================
 // INIT
 // =====================================================
@@ -164,6 +181,7 @@ onAuthStateChanged(auth, async user => {
       // Fresh cache — show immediately, skip network
       allArticles = cache.articles;
       updateLastUpdated();
+      setLoadingState(false);
       renderFeed();
     } else {
       // Stale or no cache — show stale instantly if available, then refresh silently
@@ -188,6 +206,8 @@ document.getElementById('google-signin-btn').addEventListener('click', async () 
     console.error('Sign-in error', e);
   }
 });
+
+document.getElementById('view-logs-btn').addEventListener('click', openDebugModal);
 
 document.getElementById('signout-btn').addEventListener('click', async () => {
   await signOut(auth);
@@ -252,50 +272,31 @@ async function saveUserFeeds() {
 // RSS FETCHING
 // =====================================================
 async function corsGet(url) {
-  const attempts = CORS_PROXIES.map(p =>
+  const direct = fetch(url, { signal: AbortSignal.timeout(8000) })
+    .then(r => r.ok ? r.text() : Promise.reject());
+  const proxied = CORS_PROXIES.map(p =>
     fetch(p(url), { signal: AbortSignal.timeout(8000) })
       .then(r => r.ok ? r.text() : Promise.reject(new Error(`${r.status}`)))
   );
-  return Promise.any(attempts).catch(() => { throw new Error(`All proxies failed for: ${url}`); });
+  return Promise.any([direct, ...proxied]).catch(() => { throw new Error(`All sources failed for: ${url}`); });
 }
 
-function parseRSS(xmlText, feed) {
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(xmlText, 'application/xml');
-  const isAtom = !!doc.querySelector('feed');
-  const items = isAtom ? doc.querySelectorAll('entry') : doc.querySelectorAll('item');
-  const articles = [];
+async function parseRSS(xmlText, feed) {
+  const result = await rssParser.parseString(xmlText);
+  return result.items.slice(0, 15).map(item => {
+    const rawSummary = item.contentEncoded || item.content || item.contentSnippet || item.summary || '';
+    const summary = rawSummary.replace(/<[^>]*>/g, '').trim().slice(0, 200);
 
-  items.forEach(item => {
-    const getText = tag => item.querySelector(tag)?.textContent?.trim() || '';
-    const getAttr = (tag, attr) => item.querySelector(tag)?.getAttribute(attr) || '';
-
-    let link = '';
-    if (isAtom) {
-      link = getAttr('link[rel="alternate"]', 'href') || getAttr('link', 'href') || getText('link');
-    } else {
-      link = getText('link') || getText('guid');
-    }
-
-    const title   = getText('title');
-    const summary = getText(isAtom ? 'summary' : 'description').replace(/<[^>]*>/g, '').slice(0, 200);
-    const dateStr = getText(isAtom ? 'updated' : 'pubDate');
-    const date    = dateStr ? new Date(dateStr) : null;
-
-    // YouTube: extract video ID and thumbnail
-    let videoId   = '';
+    let videoId = item.ytVideoId || '';
     let thumbnail = '';
-    const ytId = item.querySelector('videoId');
-    if (ytId) {
-      videoId   = ytId.textContent.trim();
-      thumbnail = `https://img.youtube.com/vi/${videoId}/mqdefault.jpg`;
-    }
-    const mediaThumbnail = item.querySelector('thumbnail');
-    if (mediaThumbnail) thumbnail = mediaThumbnail.getAttribute('url') || thumbnail;
+    if (videoId) thumbnail = `https://img.youtube.com/vi/${videoId}/mqdefault.jpg`;
+    if (item.mediaThumbnail) thumbnail = item.mediaThumbnail['$']?.url || thumbnail;
 
-    if (!title || !link) return;
+    const link = item.link || item.guid || '';
+    const title = item.title || '';
+    if (!title || !link) return null;
 
-    articles.push({
+    return {
       id:        `${feed.id}-${link}`,
       feedId:    feed.id,
       feedName:  feed.name,
@@ -304,24 +305,51 @@ function parseRSS(xmlText, feed) {
       title,
       summary,
       link,
-      date,
+      date:      item.isoDate ? new Date(item.isoDate) : (item.pubDate ? new Date(item.pubDate) : null),
       videoId,
       thumbnail,
       isCreator: feed.section === 'Creators',
-    });
-  });
+    };
+  }).filter(Boolean);
+}
 
-  return articles.slice(0, 15);
+function parseRss2json(json, feed) {
+  return json.items.slice(0, 15).map(item => {
+    const rawSummary = item.content || item.description || '';
+    const summary = rawSummary.replace(/<[^>]*>/g, '').trim().slice(0, 200);
+    const link = item.link || item.guid || '';
+    const title = item.title || '';
+    if (!title || !link) return null;
+    return {
+      id:        `${feed.id}-${link}`,
+      feedId:    feed.id,
+      feedName:  feed.name,
+      lang:      feed.lang,
+      section:   feed.section,
+      title,
+      summary,
+      link,
+      date:      item.pubDate ? new Date(item.pubDate) : null,
+      videoId:   '',
+      thumbnail: item.thumbnail || '',
+      isCreator: feed.section === 'Creators',
+    };
+  }).filter(Boolean);
 }
 
 async function fetchFeed(feed) {
   try {
     const xml = await corsGet(feed.url);
-    return parseRSS(xml, feed);
-  } catch (e) {
-    console.warn(`Failed to fetch ${feed.name}:`, e.message);
-    return [];
-  }
+    return await parseRSS(xml, feed);
+  } catch { /* all XML proxies failed, try rss2json */ }
+
+  const r = await fetch(
+    `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(feed.url)}`,
+    { signal: AbortSignal.timeout(12000) }
+  );
+  const json = await r.json();
+  if (json.status === 'ok') return parseRss2json(json, feed);
+  throw new Error(`All sources failed for: ${feed.name}`);
 }
 
 function sortArticles() {
@@ -339,13 +367,15 @@ async function fetchAllFeeds({ silent = false } = {}) {
   // Deduplicate against existing articles
   const seenUrls = new Set(allArticles.map(a => a.link));
 
-  let remaining = userFeeds.length;
-  let anyNew    = false;
+  let remaining   = userFeeds.length;
+  let anyNew      = false;
+  let failedCount = 0;
 
   const feedPromises = userFeeds.map(feed =>
     fetchFeed(feed)
       .then(articles => {
         const fresh = articles.filter(a => !seenUrls.has(a.link));
+        logFeed(feed.name, 'ok', `${fresh.length} new (${articles.length} total)`);
         if (fresh.length) {
           fresh.forEach(a => seenUrls.add(a.link));
           allArticles = [...fresh, ...allArticles];
@@ -354,13 +384,18 @@ async function fetchAllFeeds({ silent = false } = {}) {
           renderFeed();
         }
       })
-      .catch(() => {})
+      .catch(e => {
+        failedCount++;
+        logFeed(feed.name, 'error', e?.message || String(e));
+      })
       .finally(() => {
         remaining--;
         if (remaining === 0) {
           updateLastUpdated();
           if (!silent) setLoadingState(false);
           if (anyNew) saveCache();
+          updateFeedErrorChip(failedCount);
+          updateLogsSummary();
           // Warm up Readability so first article open is instant
           import('https://cdn.jsdelivr.net/npm/@mozilla/readability@0.5.0/+esm').catch(() => {});
         }
@@ -368,6 +403,44 @@ async function fetchAllFeeds({ silent = false } = {}) {
   );
 
   await Promise.allSettled(feedPromises);
+}
+
+function updateFeedErrorChip(count) {
+  const chip = document.getElementById('feed-error-chip');
+  if (!chip) return;
+  if (count === 0) {
+    chip.classList.add('hidden');
+  } else {
+    chip.textContent = `⚠ ${count} feed${count > 1 ? 's' : ''} failed`;
+    chip.classList.remove('hidden');
+    chip.onclick = openDebugModal;
+  }
+}
+
+function updateLogsSummary() {
+  const el = document.getElementById('logs-summary');
+  if (!el) return;
+  const errors = feedLogs.filter(l => l.status === 'error').length;
+  const ok     = feedLogs.filter(l => l.status === 'ok').length;
+  el.textContent = errors > 0
+    ? `${ok} OK, ${errors} failed — click View for details`
+    : `All ${ok} feeds loaded OK`;
+}
+
+function openDebugModal() {
+  const content = document.getElementById('debug-log-content');
+  if (feedLogs.length === 0) {
+    content.innerHTML = '<p class="debug-empty">No logs yet. Tap the 🍞 to refresh first.</p>';
+  } else {
+    content.innerHTML = feedLogs.slice().reverse().map(l =>
+      `<div class="debug-entry debug-${l.status}">
+        <span class="debug-time">${l.time}</span>
+        <span class="debug-name">${esc(l.name)}</span>
+        <span class="debug-msg">${esc(l.message)}</span>
+      </div>`
+    ).join('');
+  }
+  document.getElementById('debug-modal').classList.remove('hidden');
 }
 
 // =====================================================
@@ -680,6 +753,25 @@ document.getElementById('detect-feed-btn').addEventListener('click', async () =>
   }
 });
 
+async function resolveXhsShortLink(shortUrl) {
+  // allorigins /get returns JSON with finalUrl (the URL after all redirects)
+  try {
+    const r = await fetch(
+      `https://api.allorigins.win/get?url=${encodeURIComponent(shortUrl)}`,
+      { signal: AbortSignal.timeout(10000) }
+    );
+    const data = await r.json();
+    if (data.finalUrl?.includes('/profile/')) return data.finalUrl;
+    const m = (data.contents || '').match(/\/user\/profile\/([\w]+)/);
+    if (m) return `https://www.xiaohongshu.com/user/profile/${m[1]}`;
+  } catch { /* fall through */ }
+  // Last resort: fetch raw and scan HTML
+  const html = await corsGet(shortUrl);
+  const m = html.match(/\/user\/profile\/([\w]+)/);
+  if (m) return `https://www.xiaohongshu.com/user/profile/${m[1]}`;
+  throw new Error('Could not resolve xhslink short URL');
+}
+
 async function detectFeedUrl(inputUrl) {
   const url = inputUrl.startsWith('http') ? inputUrl : `https://${inputUrl}`;
 
@@ -690,11 +782,19 @@ async function detectFeedUrl(inputUrl) {
     return `https://www.youtube.com/feeds/videos.xml?channel_id=${channelId}`;
   }
 
-  // Check if it's an XHS URL
-  if (url.includes('xiaohongshu.com') || url.includes('xhslink.com')) {
+  // Check if it's an XHS/Rednote URL (pc share)
+  if (url.includes('xiaohongshu.com') || url.includes('rednote.com')) {
     const xhsMatch = url.match(/profile\/([\w]+)/);
     if (xhsMatch) return `https://rsshub.app/xiaohongshu/user/${xhsMatch[1]}`;
     throw new Error('Could not extract XHS user ID');
+  }
+
+  // Check if it's an xhslink.com short URL (phone share)
+  if (url.includes('xhslink.com')) {
+    const resolved = await resolveXhsShortLink(url);
+    const xhsMatch = resolved.match(/profile\/([\w]+)/);
+    if (xhsMatch) return `https://rsshub.app/xiaohongshu/user/${xhsMatch[1]}`;
+    throw new Error('Could not extract XHS user ID from short link');
   }
 
   // Try direct URL as RSS
@@ -752,13 +852,19 @@ document.getElementById('save-feed-btn').addEventListener('click', async () => {
   closeModal('add-feed-modal');
   openPanel('settings-panel');
 
-  // Fetch the new feed
-  setLoadingState(true);
-  const newArticles = await fetchFeed(newFeed);
-  allArticles.push(...newArticles);
-  allArticles.sort((a, b) => (b.date || 0) - (a.date || 0));
-  setLoadingState(false);
-  renderFeed();
+  // Silently fetch the new feed in the background — no overlay
+  fetchFeed(newFeed)
+    .then(newArticles => {
+      const seenUrls = new Set(allArticles.map(a => a.link));
+      const fresh = newArticles.filter(a => !seenUrls.has(a.link));
+      if (fresh.length) {
+        allArticles = [...fresh, ...allArticles];
+        sortArticles();
+        saveCache();
+        renderFeed();
+      }
+    })
+    .catch(e => logFeed(newFeed.name, 'error', e?.message || String(e)));
 });
 
 // Quick-add YouTube/XHS helpers

@@ -57,14 +57,14 @@
   <!-- HEADER -->
   <header id="app-header">
     <div class="header-left">
-      <span class="logo-kanji-sm">🍞</span>
-      <span class="header-title">The Daily Bao</span>
-    </div>
-    <div class="header-center">
-      <span id="last-updated" class="last-updated"></span>
-      <button id="refresh-btn" class="btn-icon" title="Refresh feeds">
-        <svg id="refresh-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.5 9a9 9 0 0 1 14.8-3.3L23 10M1 14l4.7 4.3A9 9 0 0 0 20.5 15"/></svg>
+      <button id="refresh-btn" class="logo-btn" title="Tap to refresh">
+        <span class="logo-kanji-sm">🍞</span>
       </button>
+      <div class="header-brand">
+        <span class="header-title">The Daily Bao</span>
+        <span id="last-updated" class="last-updated"></span>
+      </div>
+      <span id="feed-error-chip" class="feed-error-chip hidden"></span>
     </div>
     <div class="header-right">
       <button id="theme-toggle" class="btn-ghost">☀️ Cope</button>
@@ -94,7 +94,7 @@
 
   <!-- MAIN FEED -->
   <main id="feed-container">
-    <div id="loading-overlay" class="loading-overlay">
+    <div id="loading-overlay" class="loading-overlay hidden">
       <div class="loading-spinner"></div>
       <p id="loading-msg" class="loading-msg"></p>
     </div>
@@ -130,8 +130,31 @@
         <div id="account-info" class="account-info"></div>
         <button id="signout-btn" class="btn-ghost full-width">Sign out</button>
       </div>
+
+      <hr class="divider" />
+
+      <div class="section-block">
+        <div class="section-row">
+          <h3>Feed Logs</h3>
+          <button id="view-logs-btn" class="btn-ghost-sm">View →</button>
+        </div>
+        <p class="section-hint" id="logs-summary">Refresh to see feed status.</p>
+      </div>
     </div>
   </aside>
+
+  <!-- ===================== DEBUG LOG MODAL ===================== -->
+  <div id="debug-modal" class="modal-overlay hidden">
+    <div class="modal-card modal-card-wide">
+      <div class="modal-header">
+        <h3>🪲 Feed Logs</h3>
+        <button class="panel-close" data-close="debug-modal">✕</button>
+      </div>
+      <div class="modal-body">
+        <div id="debug-log-content" class="debug-log"></div>
+      </div>
+    </div>
+  </div>
 
   <!-- ===================== ADD FEED MODAL ===================== -->
   <div id="add-feed-modal" class="modal-overlay hidden">
@@ -189,7 +212,12 @@
           <p>Paste the YouTube <strong>channel URL</strong> (e.g. <code>youtube.com/@channelname</code>) and we'll extract the channel ID automatically.</p>
         </div>
         <div id="xhs-helper" class="helper-box hidden">
-          <p>Paste the XHS <strong>user profile URL</strong> to extract the user ID. The URL looks like: <code>xiaohongshu.com/user/profile/5d...</code></p>
+          <p>Paste any of these and click <strong>Detect RSS</strong>:</p>
+          <ul style="margin:0.4rem 0 0 1rem;font-size:0.82rem;line-height:1.7">
+            <li>PC profile: <code>xiaohongshu.com/user/profile/5d…</code></li>
+            <li>Rednote PC: <code>rednote.com/user/profile/67…</code></li>
+            <li>Phone share: <code>xhslink.com/m/XXX…</code></li>
+          </ul>
         </div>
       </div>
       <div class="modal-footer">
@@ -290,6 +318,7 @@
 </div><!-- end #app-page -->
 
 <!-- Scripts -->
+<script src="https://cdn.jsdelivr.net/npm/rss-parser@3/dist/rss-parser.min.js"></script>
 <script type="module" src="app.js"></script>
 </body>
 </html>
