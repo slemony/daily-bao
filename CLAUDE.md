@@ -8,14 +8,16 @@ A personal news reader web app that replaces social media. Free, cloud-hosted on
 - **Auth**: Firebase Auth — Google Sign-in only
 - **Database**: Firestore — stores per-user feed config (`/users/{uid}` → `{ feeds: [...] }`)
 - **Hosting**: Firebase Hosting (`firebase deploy`)
-- **RSS fetching**: Client-side via CORS proxies (corsproxy.io, allorigins.win)
-- **Article reader**: Mozilla Readability.js loaded from jsDelivr CDN
+- **RSS fetching**: Client-side via CORS proxies (api.allorigins.win, api.codetabs.com, api.cors.lol) — raced in parallel with `Promise.any`, 8s timeout
+- **Article reader**: Mozilla Readability.js loaded from jsDelivr CDN (preloaded silently after first feed fetch)
+- **Article cache**: `localStorage` key `dailybao_feed_cache` — same-day cache, stale-while-revalidate on new day
 
 ## File structure
 ```
 index.html       — app shell (login page + full SPA in one file)
 style.css        — all styling, dark/light theme via [data-theme] on <html>
 app.js           — all logic: Firebase, RSS parsing, Readability, UI
+manifest.json    — PWA manifest (app icon, theme colour, standalone mode)
 firebase.json    — Firebase Hosting + Firestore config
 firestore.rules  — security rules (users own only their own doc)
 .firebaserc      — Firebase project ID reference
@@ -25,9 +27,13 @@ README.md        — setup guide for deploying to Firebase
 ## Key design decisions
 - **No build step** — deploy with `firebase deploy`, edit files directly
 - **No backend / Cloud Functions** — stays on Firebase free Spark plan
-- **CORS proxies** — RSS and article fetching goes through corsproxy.io with allorigins.win as fallback
-- **Firestore stores config only** — articles are fetched fresh client-side on each load, not cached
-- **Single `app.js`** — all logic in one file intentionally; don't split unless it exceeds ~600 lines
+- **CORS proxies raced in parallel** — all three proxies fire simultaneously; fastest response wins
+- **localStorage article cache** — same-day loads skip network entirely; stale cache shows instantly then refreshes in background
+- **Progressive feed rendering** — articles appear in UI as each feed resolves, not after all finish
+- **Incremental refresh** — manual refresh and background refresh merge new articles by URL dedup; nothing is flushed
+- **Firestore stores config only** — articles are never written to Firestore
+- **Single `app.js`** — all logic in one file intentionally; don't split unless it exceeds ~800 lines
+- **Theme persists via localStorage** — default is light (warm newspaper palette); user preference remembered across sessions
 
 ## Firebase config
 The `FIREBASE_CONFIG` object at the top of `app.js` is a placeholder. User fills it in from Firebase Console → Project Settings → Your Apps. Do not commit real API keys.
@@ -45,10 +51,17 @@ The `FIREBASE_CONFIG` object at the top of `app.js` is a placeholder. User fills
 - YouTube: standard Atom feed `https://www.youtube.com/feeds/videos.xml?channel_id=CHANNEL_ID`
 - XHS: via RSSHub public instance `https://rsshub.app/xiaohongshu/user/{userid}`
 
+## UI personality / copy to preserve
+- Splash screen silly one-liners (`SPLASH_MSGS` array in app.js) — add more, never remove
+- Loading overlay messages (`LOADING_MSGS` array) — same rule
+- Section emoji names (🔥 What's Burning, 🤓 Nerd Alert, etc.) — keep as-is
+- Theme toggle labels: "☀️ Cope" (dark mode button) · "🌙 Vibe" (light mode button)
+- App logo: 🍞 emoji, "The Daily Bao" in DM Serif Display font
+
 ## What the user cares about
 - No ads, no redirects — article reader must strip to clean text
 - Works on mobile and PC without login friction
-- Easy to add any news source (paste URL → auto-detect RSS)
+- Easy to add any news source (paste URL → auto-detect RSS); edit existing sources with live RSS test
 - Fun, irreverent UI personality — keep the humor in loading messages and empty states
 - Free hosting — do not introduce paid services or Cloud Functions
 

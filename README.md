@@ -81,7 +81,7 @@ After first deploy, go to Firebase → Authentication → Settings → Authorize
 
 ## Adding news sources
 
-In the app, click ⚙️ → **+ Add Source**. Options:
+In the app, click your **profile picture** → **+ Add Source**. Options:
 
 | What to paste | What it gives you |
 |---|---|
@@ -105,7 +105,11 @@ In the app, click ⚙️ → **+ Add Source**. Options:
 - **YouTube**: Embed and watch videos inline without leaving the app
 - **XHS (小红书)**: View creator posts via RSSHub
 - **Per-user sources**: Each Google account has its own independent feed list
-- **Dark / Light mode**: Toggle between ☀️ Cope and 🌙 Vibe
+- **Edit sources**: Tap the pencil icon on any source to edit name/section/language and see a live RSS preview with recent headlines
+- **Dark / Light mode**: Toggle between ☀️ Cope and 🌙 Vibe — preference is saved across sessions
+- **Newspaper light theme**: Default warm off-white palette, easy on the eyes
+- **Same-day cache**: Articles load instantly from cache on same-day revisits; auto-refreshes on new day
+- **Progressive loading**: Articles appear feed-by-feed as they resolve — no waiting for all sources
 - **Language filter**: Show All / EN / 繁 / 简 at a glance
 - **No PC needed**: Everything runs in the cloud
 
@@ -118,6 +122,7 @@ News/
 ├── index.html        ← App shell (login + feed UI)
 ├── style.css         ← Styling (dark/light themes)
 ├── app.js            ← All logic: auth, RSS, reader, UI
+├── manifest.json     ← PWA manifest (home screen icon, standalone mode)
 ├── firebase.json     ← Hosting + Firestore config
 ├── firestore.rules   ← Security rules (users own their data)
 └── .firebaserc       ← Firebase project reference
