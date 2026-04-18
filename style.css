@@ -1088,53 +1088,168 @@ button { cursor: pointer; font-family: var(--font-main); border: none; backgroun
   padding: 4rem 1rem;
 }
 
+/* =====================================================
+   READER — Newspaper / paper-like reading layout
+   Serif body, justified with hyphens, drop cap, paper grain.
+   ===================================================== */
 .reader-content {
-  padding: 2rem max(1.5rem, 5%);
+  padding: 2.5rem max(1.5rem, 5%) 4rem;
   max-width: 680px;
+  background-color: var(--bg);
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.04 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+  background-repeat: repeat;
 }
 
-/* Reader typography */
+[data-theme="dark"] .reader-content {
+  background-color: #1a1826;
+  color: #e8e4d8;
+}
+
+/* Headline — DM Serif Display, newspaper scale */
 .reader-content h1 {
-  font-size: 1.5rem;
-  font-weight: 700;
-  line-height: 1.3;
-  margin-bottom: 1rem;
+  font-family: var(--font-serif-display);
+  font-size: clamp(1.75rem, 4.5vw, 2.4rem);
+  font-weight: 400;
+  line-height: 1.08;
+  letter-spacing: -0.01em;
+  margin-bottom: 0.5rem;
   color: var(--text);
 }
-.reader-content p {
-  font-size: 0.95rem;
-  line-height: 1.8;
-  color: var(--text-muted);
-  margin-bottom: 1rem;
+[data-theme="dark"] .reader-content h1 { color: #f4efe3; }
+
+/* Byline — small-caps sans, like a newspaper credit line */
+.reader-byline {
+  font-family: var(--font-main);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin: 0.25rem 0 0;
 }
-.reader-content h2, .reader-content h3 {
-  font-size: 1.05rem;
-  font-weight: 700;
-  margin: 1.5rem 0 0.5rem;
+
+/* Hairline rule under the headline block */
+.reader-rule {
+  border: 0;
+  border-top: 1px solid var(--border-strong);
+  margin: 1.25rem 0 1.75rem;
+}
+
+/* Body prose */
+.reader-prose {
+  font-family: var(--font-serif-body);
+  font-size: 1.0625rem;
+  line-height: 1.6;
   color: var(--text);
+  text-align: justify;
+  text-justify: inter-word;
+  hyphens: auto;
+  -webkit-hyphens: auto;
+  -ms-hyphens: auto;
 }
-.reader-content img {
+[data-theme="dark"] .reader-prose { color: #e8e4d8; }
+
+.reader-prose p {
+  margin: 0 0 0.4em;
+}
+
+/* First-line indent for every paragraph after the first */
+.reader-prose p + p {
+  text-indent: 1.25em;
+}
+
+/* Drop cap — only when first child is a paragraph */
+.reader-prose > p:first-child::first-letter {
+  float: left;
+  font-family: var(--font-serif-display);
+  font-size: 3.6em;
+  line-height: 0.85;
+  padding: 0.05em 0.08em 0 0;
+  color: var(--accent);
+  font-weight: 400;
+}
+
+/* Subheadings */
+.reader-prose h2,
+.reader-prose h3 {
+  font-family: var(--font-serif-display);
+  font-weight: 400;
+  line-height: 1.2;
+  margin: 1.75rem 0 0.5rem;
+  color: var(--text);
+  text-indent: 0;
+}
+.reader-prose h2 { font-size: 1.4rem; }
+.reader-prose h3 { font-size: 1.15rem; }
+[data-theme="dark"] .reader-prose h2,
+[data-theme="dark"] .reader-prose h3 { color: #f4efe3; }
+
+/* Paragraphs immediately after a heading get no indent */
+.reader-prose h2 + p,
+.reader-prose h3 + p { text-indent: 0; }
+
+/* Pull-quote */
+.reader-prose blockquote {
+  font-family: var(--font-serif-body);
+  font-size: 1.2rem;
+  line-height: 1.5;
+  font-style: italic;
+  text-align: center;
+  text-indent: 0;
+  color: var(--text);
+  margin: 2rem auto;
+  padding: 0 1rem;
+  max-width: 90%;
+  border: 0;
+}
+.reader-prose blockquote p { text-indent: 0; margin: 0; }
+
+/* Lists */
+.reader-prose ul,
+.reader-prose ol {
+  padding-left: 1.5rem;
+  margin: 0.75rem 0 1rem;
+  line-height: 1.6;
+}
+.reader-prose li { margin-bottom: 0.25rem; text-indent: 0; }
+
+/* Images & figures */
+.reader-prose img {
   max-width: 100%;
   border-radius: var(--radius-sm);
-  margin: 1rem 0;
+  margin: 1.5rem 0 0.5rem;
+  display: block;
 }
-.reader-content a { color: var(--accent); }
-.reader-content blockquote {
-  border-left: 3px solid var(--accent);
-  padding: 0.5rem 0 0.5rem 1rem;
-  color: var(--text-muted);
+.reader-prose figure { margin: 1.5rem 0; text-indent: 0; }
+.reader-prose figcaption {
+  font-family: var(--font-serif-body);
   font-style: italic;
-  margin: 1rem 0;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  text-align: center;
+  margin-top: 0.4rem;
+  text-indent: 0;
 }
-.reader-content ul, .reader-content ol {
-  padding-left: 1.5rem;
-  margin-bottom: 1rem;
-  color: var(--text-muted);
-  line-height: 1.8;
-  font-size: 0.95rem;
+
+/* Links */
+.reader-prose a {
+  color: var(--text);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.18em;
+  text-decoration-color: var(--text-dim);
 }
-.reader-content figure { margin: 1rem 0; }
-.reader-content figcaption { font-size: 0.78rem; color: var(--text-dim); text-align: center; margin-top: 0.3rem; }
+.reader-prose a:hover { text-decoration-color: var(--accent); color: var(--accent); }
+
+/* CJK: disable justification (prevents awkward inter-glyph spacing) */
+.reader-prose:lang(zh),
+.reader-prose:lang(zh-Hans),
+.reader-prose:lang(zh-Hant),
+.reader-prose:lang(ja),
+.reader-prose:lang(ko) {
+  text-align: left;
+  hyphens: manual;
+}
 
 .reader-error {
   display: flex;
