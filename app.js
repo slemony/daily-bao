@@ -658,6 +658,16 @@ function renderFeedList() {
 
     list.appendChild(details);
   });
+
+  // Expand / collapse all toggle on the "Your feeds" header
+  const toggle = document.getElementById('feed-list-toggle');
+  const chevron = document.getElementById('feed-list-chevron');
+  toggle.onclick = () => {
+    const allDetails = list.querySelectorAll('details');
+    const anyOpen = [...allDetails].some(d => d.open);
+    allDetails.forEach(d => d.open = !anyOpen);
+    chevron.classList.toggle('collapsed', anyOpen);
+  };
 }
 
 async function removeFeed(feedId) {
@@ -961,15 +971,14 @@ document.getElementById('user-btn').addEventListener('click', () => {
 });
 document.getElementById('reader-back-btn').addEventListener('click', () => closePanel('reader-panel'));
 
-// Swipe-to-dismiss reader panel (left-edge swipe)
-(function () {
-  const panel = document.getElementById('reader-panel');
-  let startX = 0, startY = 0, dragging = false;
+// Swipe-to-dismiss for slide-in panels (left-edge swipe)
+function addSwipeToDismiss(panel) {
+  let startX = 0, startY = 0, dragging = false, initiated = false;
 
   panel.addEventListener('touchstart', e => {
     startX = e.touches[0].clientX;
     startY = e.touches[0].clientY;
-    dragging = startX < 40;
+    initiated = dragging = startX < 40;
   }, { passive: true });
 
   panel.addEventListener('touchmove', e => {
@@ -982,10 +991,12 @@ document.getElementById('reader-back-btn').addEventListener('click', () => close
   }, { passive: true });
 
   panel.addEventListener('touchend', e => {
-    if (!dragging) return;
+    if (!initiated) return;
+    initiated = false;
+    const wasDragging = dragging;
     dragging = false;
     const dx = e.changedTouches[0].clientX - startX;
-    if (dx >= 80) {
+    if (wasDragging && dx >= 80) {
       panel.style.transition = 'transform 0.25s ease';
       panel.style.transform = 'translateX(100%)';
       panel.addEventListener('transitionend', () => {
@@ -999,7 +1010,10 @@ document.getElementById('reader-back-btn').addEventListener('click', () => close
       panel.style.transform = '';
     }
   }, { passive: true });
-})();
+}
+
+addSwipeToDismiss(document.getElementById('reader-panel'));
+addSwipeToDismiss(document.getElementById('settings-panel'));
 
 // Close modal on backdrop click
 document.getElementById('add-feed-modal').addEventListener('click', e => {
@@ -1107,17 +1121,40 @@ function sectionLabel(s) {
 // =====================================================
 // PULL-TO-REFRESH
 // =====================================================
+const PTR_PULL_MSGS = [
+  "Keep going... the news won't refresh itself...",
+  "Almost... just a little more suffering...",
+  "The bao is watching. Pull harder.",
+  "Are you sure about this? No going back.",
+  "This is your last chance to live in ignorance.",
+  "One more tug and chaos is yours.",
+  "Pulling fresh anxiety from the cloud...",
+  "The algorithm fears you.",
+  "Every headline you're about to read is someone's bad day.",
+  "Bracing for impact...",
+];
+const PTR_READY_MSGS = [
+  "Release for fresh chaos 🍞",
+  "Let go, coward. Do it. 🍞",
+  "Yes! YES! Release! 🍞",
+  "The bao is ready. Are you? 🍞",
+  "Drop it like it's hot news 🍞",
+  "Moment of truth. Release. 🍞",
+];
+
 (function () {
   const ptrEl = document.getElementById('ptr-indicator');
+  const ptrText = document.getElementById('ptr-text');
   const refreshBtn = document.getElementById('refresh-btn');
-  let ptrStartY = 0, ptrActive = false, ptrTriggered = false;
+  let ptrStartY = 0, ptrActive = false, wasReady = false;
   const PTR_THRESHOLD = 70;
 
   document.addEventListener('touchstart', e => {
     if (window.scrollY === 0 && !refreshBtn.classList.contains('spinning')) {
       ptrStartY = e.touches[0].clientY;
       ptrActive = true;
-      ptrTriggered = false;
+      wasReady = false;
+      ptrText.textContent = PTR_PULL_MSGS[Math.floor(Math.random() * PTR_PULL_MSGS.length)];
     }
   }, { passive: true });
 
@@ -1126,7 +1163,15 @@ function sectionLabel(s) {
     const dy = e.touches[0].clientY - ptrStartY;
     if (dy > 5) {
       ptrEl.classList.add('pulling');
-      ptrEl.classList.toggle('ready', dy >= PTR_THRESHOLD);
+      const ready = dy >= PTR_THRESHOLD;
+      ptrEl.classList.toggle('ready', ready);
+      if (ready && !wasReady) {
+        wasReady = true;
+        ptrText.textContent = PTR_READY_MSGS[Math.floor(Math.random() * PTR_READY_MSGS.length)];
+      } else if (!ready && wasReady) {
+        wasReady = false;
+        ptrText.textContent = PTR_PULL_MSGS[Math.floor(Math.random() * PTR_PULL_MSGS.length)];
+      }
     } else {
       ptrEl.classList.remove('pulling', 'ready');
     }
@@ -1141,6 +1186,7 @@ function sectionLabel(s) {
       refreshBtn.classList.add('spinning');
       fetchAllFeeds({ silent: true }).then(() => refreshBtn.classList.remove('spinning'));
     }
+    ptrText.textContent = 'Pull to refresh';
   }, { passive: true });
 })();
 

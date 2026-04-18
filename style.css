@@ -775,7 +775,16 @@ button { cursor: pointer; font-family: var(--font-main); border: none; backgroun
   letter-spacing: 0.06em;
   color: var(--text-dim);
   padding-top: 0.25rem;
+  cursor: pointer;
+  user-select: none;
 }
+.feed-list-header:hover { color: var(--text-muted); }
+.feed-list-chevron {
+  font-size: 0.8rem;
+  transition: transform 0.2s ease;
+  display: inline-block;
+}
+.feed-list-chevron.collapsed { transform: rotate(-90deg); }
 .badge {
   background: var(--bg-elevated);
   border: 1px solid var(--border);

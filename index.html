@@ -98,7 +98,7 @@
   <main id="feed-container">
     <div id="ptr-indicator" class="ptr-indicator">
       <span id="ptr-icon">🍞</span>
-      <span>Pull to refresh</span>
+      <span id="ptr-text">Pull to refresh</span>
     </div>
     <div id="loading-overlay" class="loading-overlay hidden">
       <div class="loading-spinner"></div>
@@ -123,9 +123,12 @@
     <div class="panel-body">
       <button id="add-feed-btn" class="btn-primary full-width">+ Add Source</button>
 
-      <div class="feed-list-header">
+      <div class="feed-list-header" id="feed-list-toggle" title="Expand / collapse all">
         <span>Your feeds</span>
-        <span id="feed-count" class="badge"></span>
+        <div style="display:flex;align-items:center;gap:0.4rem">
+          <span id="feed-count" class="badge"></span>
+          <span id="feed-list-chevron" class="feed-list-chevron">▾</span>
+        </div>
       </div>
       <div id="feed-list" class="feed-list"></div>
 
