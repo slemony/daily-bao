@@ -255,6 +255,7 @@ async function loadUserFeeds() {
   } catch (e) {
     console.warn('Firestore unavailable, using defaults:', e.message);
     userFeeds = [...DEFAULT_FEEDS];
+    showToast('⚠️ Could not load your feeds from cloud — showing defaults');
   }
   renderFeedList();
 }
@@ -616,27 +617,46 @@ function renderFeedList() {
   count.textContent = userFeeds.length;
   list.innerHTML = '';
 
+  // Group feeds by section, preserving insertion order
+  const groups = new Map();
   userFeeds.forEach(feed => {
-    const el = document.createElement('div');
-    el.className = 'feed-item';
-    el.innerHTML = `
-      <div class="feed-item-info">
-        <div class="feed-item-name">${esc(feed.name)}</div>
-        <div class="feed-item-section">
-          <span class="lang-badge" data-lang="${esc(feed.lang)}" style="font-size:0.6rem;padding:0.1rem 0.35rem">${esc(feed.lang)}</span>
-          ${esc(sectionLabel(feed.section))}
+    const sec = feed.section || 'Other';
+    if (!groups.has(sec)) groups.set(sec, []);
+    groups.get(sec).push(feed);
+  });
+
+  groups.forEach((feeds, secName) => {
+    const details = document.createElement('details');
+    details.className = 'feed-section-group';
+    details.open = true;
+
+    const summary = document.createElement('summary');
+    summary.innerHTML = `<span>${esc(sectionLabel(secName))}</span><span class="feed-section-count">${feeds.length}</span>`;
+    details.appendChild(summary);
+
+    feeds.forEach(feed => {
+      const el = document.createElement('div');
+      el.className = 'feed-item';
+      el.innerHTML = `
+        <div class="feed-item-info">
+          <div class="feed-item-name">${esc(feed.name)}</div>
+          <div class="feed-item-section">
+            <span class="lang-badge" data-lang="${esc(feed.lang)}" style="font-size:0.6rem;padding:0.1rem 0.35rem">${esc(feed.lang)}</span>
+          </div>
         </div>
-      </div>
-      <div class="feed-item-actions">
-        <button class="btn-edit" data-feed-id="${esc(feed.id)}" title="Edit & test">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-        </button>
-        <button class="btn-remove" data-feed-id="${esc(feed.id)}" title="Remove">✕</button>
-      </div>
-    `;
-    el.querySelector('.btn-edit').addEventListener('click', () => openEditFeed(feed.id));
-    el.querySelector('.btn-remove').addEventListener('click', () => removeFeed(feed.id));
-    list.appendChild(el);
+        <div class="feed-item-actions">
+          <button class="btn-edit" title="Edit & test">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+          <button class="btn-remove" title="Remove">✕</button>
+        </div>
+      `;
+      el.querySelector('.btn-edit').addEventListener('click', () => openEditFeed(feed.id));
+      el.querySelector('.btn-remove').addEventListener('click', () => removeFeed(feed.id));
+      details.appendChild(el);
+    });
+
+    list.appendChild(details);
   });
 }
 
@@ -939,6 +959,46 @@ document.getElementById('panel-backdrop').addEventListener('click', () => {
 document.getElementById('user-btn').addEventListener('click', () => openPanel('settings-panel'));
 document.getElementById('reader-back-btn').addEventListener('click', () => closePanel('reader-panel'));
 
+// Swipe-to-dismiss reader panel (left-edge swipe)
+(function () {
+  const panel = document.getElementById('reader-panel');
+  let startX = 0, startY = 0, dragging = false;
+
+  panel.addEventListener('touchstart', e => {
+    startX = e.touches[0].clientX;
+    startY = e.touches[0].clientY;
+    dragging = startX < 40;
+  }, { passive: true });
+
+  panel.addEventListener('touchmove', e => {
+    if (!dragging) return;
+    const dx = e.touches[0].clientX - startX;
+    const dy = Math.abs(e.touches[0].clientY - startY);
+    if (dx < 0 || dy > dx) { dragging = false; return; }
+    panel.style.transition = 'none';
+    panel.style.transform = `translateX(${dx}px)`;
+  }, { passive: true });
+
+  panel.addEventListener('touchend', e => {
+    if (!dragging) return;
+    dragging = false;
+    const dx = e.changedTouches[0].clientX - startX;
+    if (dx >= 80) {
+      panel.style.transition = 'transform 0.25s ease';
+      panel.style.transform = 'translateX(100%)';
+      panel.addEventListener('transitionend', () => {
+        panel.style.transition = '';
+        panel.style.transform = '';
+        panel.classList.remove('open');
+        hidePanelBackdrop();
+      }, { once: true });
+    } else {
+      panel.style.transition = '';
+      panel.style.transform = '';
+    }
+  }, { passive: true });
+})();
+
 // Close modal on backdrop click
 document.getElementById('add-feed-modal').addEventListener('click', e => {
   if (e.target === document.getElementById('add-feed-modal')) closeModal('add-feed-modal');
@@ -1040,4 +1100,59 @@ function sectionLabel(s) {
     'Creators':   '🎬 Creator Watch',
   };
   return map[s] || s;
+}
+
+// =====================================================
+// PULL-TO-REFRESH
+// =====================================================
+(function () {
+  const ptrEl = document.getElementById('ptr-indicator');
+  const refreshBtn = document.getElementById('refresh-btn');
+  let ptrStartY = 0, ptrActive = false, ptrTriggered = false;
+  const PTR_THRESHOLD = 70;
+
+  document.addEventListener('touchstart', e => {
+    if (window.scrollY === 0 && !refreshBtn.classList.contains('spinning')) {
+      ptrStartY = e.touches[0].clientY;
+      ptrActive = true;
+      ptrTriggered = false;
+    }
+  }, { passive: true });
+
+  document.addEventListener('touchmove', e => {
+    if (!ptrActive) return;
+    const dy = e.touches[0].clientY - ptrStartY;
+    if (dy > 5) {
+      ptrEl.classList.add('pulling');
+      ptrEl.classList.toggle('ready', dy >= PTR_THRESHOLD);
+    } else {
+      ptrEl.classList.remove('pulling', 'ready');
+    }
+  }, { passive: true });
+
+  document.addEventListener('touchend', e => {
+    if (!ptrActive) return;
+    ptrActive = false;
+    const dy = e.changedTouches[0].clientY - ptrStartY;
+    ptrEl.classList.remove('pulling', 'ready');
+    if (dy >= PTR_THRESHOLD && !refreshBtn.classList.contains('spinning')) {
+      refreshBtn.classList.add('spinning');
+      fetchAllFeeds({ silent: true }).then(() => refreshBtn.classList.remove('spinning'));
+    }
+  }, { passive: true });
+})();
+
+// =====================================================
+// TOAST
+// =====================================================
+function showToast(msg, duration = 4000) {
+  const toast = document.createElement('div');
+  toast.className = 'toast';
+  toast.textContent = msg;
+  document.body.appendChild(toast);
+  requestAnimationFrame(() => toast.classList.add('toast-show'));
+  setTimeout(() => {
+    toast.classList.remove('toast-show');
+    toast.addEventListener('transitionend', () => toast.remove(), { once: true });
+  }, duration);
 }

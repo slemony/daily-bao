@@ -9,6 +9,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;700&family=Noto+Sans+SC:wght@400;500;700&family=DM+Serif+Display&family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Noto+Serif+TC:wght@400;700&family=Noto+Serif+SC:wght@400;700&display=swap" rel="stylesheet" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍞</text></svg>">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Daily Bao">
   <link rel="manifest" href="manifest.json">
   <meta name="theme-color" content="#7c3aed">
 </head>
@@ -67,7 +70,6 @@
       <span id="feed-error-chip" class="feed-error-chip hidden"></span>
     </div>
     <div class="header-right">
-      <button id="theme-toggle" class="btn-ghost">☀️ Cope</button>
       <button id="user-btn" class="btn-avatar" title="Settings & Account">
         <img id="user-avatar" src="" alt="avatar" width="30" height="30" />
       </button>
@@ -94,6 +96,10 @@
 
   <!-- MAIN FEED -->
   <main id="feed-container">
+    <div id="ptr-indicator" class="ptr-indicator">
+      <span id="ptr-icon">🍞</span>
+      <span>Pull to refresh</span>
+    </div>
     <div id="loading-overlay" class="loading-overlay hidden">
       <div class="loading-spinner"></div>
       <p id="loading-msg" class="loading-msg"></p>
@@ -122,6 +128,13 @@
         <span id="feed-count" class="badge"></span>
       </div>
       <div id="feed-list" class="feed-list"></div>
+
+      <hr class="divider" />
+
+      <div class="section-block">
+        <h3>Appearance</h3>
+        <button id="theme-toggle" class="btn-ghost full-width">☀️ Cope</button>
+      </div>
 
       <hr class="divider" />
 

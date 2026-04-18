@@ -504,6 +504,23 @@ button { cursor: pointer; font-family: var(--font-main); border: none; backgroun
 /* =====================================================
    FEED GRID
    ===================================================== */
+.ptr-indicator {
+  display: flex; align-items: center; justify-content: center; gap: 0.5rem;
+  overflow: hidden; height: 0; opacity: 0; font-size: 0.82rem;
+  color: var(--text-dim); transition: height 0.18s ease, opacity 0.18s ease;
+}
+.ptr-indicator.pulling { height: 52px; opacity: 1; }
+.ptr-indicator.ready #ptr-icon { display: inline-block; animation: spin 0.7s linear infinite; }
+
+.toast {
+  position: fixed; bottom: 1.5rem; left: 50%; transform: translateX(-50%) translateY(1rem);
+  background: var(--text); color: var(--bg); padding: 0.6rem 1.1rem;
+  border-radius: var(--radius-pill); font-size: 0.8rem; z-index: 9999;
+  opacity: 0; transition: opacity 0.25s ease, transform 0.25s ease;
+  white-space: nowrap; pointer-events: none;
+}
+.toast.toast-show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
 #feed-container {
   flex: 1;
   padding: 0.75rem 1.25rem 2rem;
@@ -765,7 +782,25 @@ button { cursor: pointer; font-family: var(--font-main); border: none; backgroun
   color: var(--text-muted);
 }
 
-.feed-list { display: flex; flex-direction: column; gap: 0.5rem; }
+.feed-list { display: flex; flex-direction: column; }
+
+.feed-section-group { border-bottom: 1px solid var(--border); }
+.feed-section-group:last-child { border-bottom: none; }
+.feed-section-group summary {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0.55rem 0; cursor: pointer; font-size: 0.72rem;
+  font-weight: 600; color: var(--text-muted); list-style: none;
+  user-select: none;
+}
+.feed-section-group summary::-webkit-details-marker { display: none; }
+.feed-section-group[open] summary { padding-bottom: 0.4rem; }
+.feed-section-count {
+  font-size: 0.65rem; background: var(--bg-elevated);
+  border: 1px solid var(--border); border-radius: 99px;
+  padding: 0.1rem 0.45rem; color: var(--text-dim);
+}
+.feed-section-group .feed-item { margin-bottom: 0.4rem; }
+.feed-section-group .feed-item:last-child { margin-bottom: 0.55rem; }
 
 .feed-item {
   display: flex;
