@@ -528,6 +528,59 @@ function buildCreatorCard(a, i) {
 // =====================================================
 // READER
 // =====================================================
+
+// Strip duplicate bylines at the start and promotional footers at the end
+// from Readability output. Only removes leading/trailing matches — never
+// touches the middle of the article.
+const READER_FOOTER_RE = /^\s*(learn more|read more|continue reading|view (the )?original|originally published|this article (first |originally )?appeared|subscribe( to)?|sign up|follow us( on)?|download( the)? app|click here|get the newsletter|related (stories?|articles?)|more stories|share this|like this story|support our journalism|want more( like this)?)\b/i;
+
+function cleanReaderContent(html, bylineText) {
+  const tpl = document.createElement('template');
+  tpl.innerHTML = html;
+  const root = tpl.content;
+
+  const textOf = el => (el.textContent || '').replace(/\s+/g, ' ').trim();
+  const norm = s => s.toLowerCase().replace(/\s+/g, ' ').trim();
+
+  // Pass A: strip duplicate byline / preamble from the first 3 elements.
+  const byline = norm(bylineText || '');
+  let checked = 0;
+  while (root.firstElementChild && checked < 3) {
+    const el = root.firstElementChild;
+    const text = textOf(el);
+    const lower = norm(text);
+    const looksLikePreamble = /^(by |updated |published |posted |written by )/i.test(text) && text.length < 160;
+    const matchesByline = byline && byline.length > 3 && lower.includes(byline);
+    if (looksLikePreamble || matchesByline) {
+      el.remove();
+      checked++;
+      continue;
+    }
+    break;
+  }
+
+  // Pass B: strip trailing footer promos, empty nodes, trailing <hr>s.
+  while (root.lastElementChild) {
+    const el = root.lastElementChild;
+    const tag = el.tagName;
+    const text = textOf(el);
+    if (!text && tag !== 'IMG' && tag !== 'FIGURE') { el.remove(); continue; }
+    if (tag === 'HR') { el.remove(); continue; }
+    if (READER_FOOTER_RE.test(text) && text.length < 200) { el.remove(); continue; }
+    // Single-link paragraph whose only text is a footer phrase
+    const links = el.querySelectorAll ? el.querySelectorAll('a') : [];
+    if (links.length === 1 && textOf(links[0]) === text && READER_FOOTER_RE.test(text)) {
+      el.remove();
+      continue;
+    }
+    break;
+  }
+
+  const out = document.createElement('div');
+  out.appendChild(root);
+  return out.innerHTML;
+}
+
 async function openReader(article) {
   const panel = document.getElementById('reader-panel');
   const readerContent  = document.getElementById('reader-content');
@@ -593,12 +646,13 @@ async function openReader(article) {
     const sample = (parsed.textContent || '').slice(0, 200);
     const isCJK = /[\u3400-\u9fff\uf900-\ufaff\u3040-\u30ff\uac00-\ud7af]/.test(sample);
     const proseClass = isCJK ? 'reader-prose is-cjk' : 'reader-prose';
+    const cleanedContent = cleanReaderContent(parsed.content, parsed.byline || '');
 
     readerContent.innerHTML = `
       <h1>${esc(parsed.title || article.title)}</h1>
       ${parsed.byline ? `<p class="reader-byline">${esc(parsed.byline)}</p>` : ''}
       <hr class="reader-rule">
-      <div class="${proseClass}">${parsed.content}</div>
+      <div class="${proseClass}">${cleanedContent}</div>
     `;
 
     readerLoading.classList.add('hidden');
@@ -676,6 +730,9 @@ function renderFeedList() {
 }
 
 async function removeFeed(feedId) {
+  const feed = userFeeds.find(f => f.id === feedId);
+  if (!feed) return;
+  if (!confirm(`Yeet "${feed.name}" from your sources?`)) return;
   userFeeds = userFeeds.filter(f => f.id !== feedId);
   await saveUserFeeds();
   renderFeedList();
