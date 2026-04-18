@@ -311,7 +311,8 @@ button { cursor: pointer; font-family: var(--font-main); border: none; backgroun
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  flex-shrink: 0;
+  flex: 1;
+  min-width: 0;
 }
 .logo-btn {
   background: none;
@@ -333,15 +334,17 @@ button { cursor: pointer; font-family: var(--font-main); border: none; backgroun
   display: flex;
   flex-direction: column;
   gap: 0.05rem;
+  min-width: 0;
 }
 .header-title {
   font-size: 1rem;
   font-weight: 700;
   letter-spacing: -0.02em;
-  display: none;
   line-height: 1.1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-@media (min-width: 480px) { .header-title { display: block; } }
 .last-updated {
   font-size: 0.65rem;
   color: var(--text-dim);

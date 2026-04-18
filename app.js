@@ -412,7 +412,7 @@ function updateFeedErrorChip(count) {
   if (count === 0) {
     chip.classList.add('hidden');
   } else {
-    chip.textContent = `⚠ ${count} feed${count > 1 ? 's' : ''} failed`;
+    chip.textContent = `⚠ ${count}`;
     chip.classList.remove('hidden');
     chip.onclick = openDebugModal;
   }
@@ -692,8 +692,7 @@ async function openEditFeed(feedId) {
   openModal('edit-feed-modal');
 
   try {
-    const xml      = await corsGet(feed.url);
-    const articles = parseRSS(xml, feed);
+    const articles = await fetchFeed(feed);
     if (articles.length === 0) throw new Error('empty');
 
     status.textContent = `✓ ${articles.length} articles found`;
@@ -956,7 +955,10 @@ document.getElementById('panel-backdrop').addEventListener('click', () => {
   hidePanelBackdrop();
 });
 
-document.getElementById('user-btn').addEventListener('click', () => openPanel('settings-panel'));
+document.getElementById('user-btn').addEventListener('click', () => {
+  renderFeedList();
+  openPanel('settings-panel');
+});
 document.getElementById('reader-back-btn').addEventListener('click', () => closePanel('reader-panel'));
 
 // Swipe-to-dismiss reader panel (left-edge swipe)
