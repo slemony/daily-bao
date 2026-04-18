@@ -67,6 +67,7 @@
         <span class="header-title">The Daily Bao</span>
         <span id="last-updated" class="last-updated"></span>
       </div>
+      <span id="feed-filter-chip" class="feed-filter-chip hidden"></span>
       <span id="feed-error-chip" class="feed-error-chip hidden"></span>
     </div>
     <div class="header-right">
@@ -76,26 +77,14 @@
     </div>
   </header>
 
-  <!-- SECTION TABS -->
-  <nav id="section-tabs">
-    <button class="tab active" data-section="all">✨ All</button>
-    <button class="tab" data-section="World News">🔥 What's Burning</button>
-    <button class="tab" data-section="Tech & AI">🤓 Nerd Alert</button>
-    <button class="tab" data-section="Business">💸 Money Stuff</button>
-    <button class="tab" data-section="Creators">🎬 Creator Watch</button>
-  </nav>
+  <!-- Section tabs hidden — sections managed via settings panel -->
+  <nav id="section-tabs" class="hidden"></nav>
 
-  <!-- LANGUAGE FILTER -->
-  <div id="lang-filter">
-    <span class="filter-label">Filter:</span>
-    <button class="lang-btn active" data-lang="all">All</button>
-    <button class="lang-btn" data-lang="EN">EN</button>
-    <button class="lang-btn" data-lang="繁">繁</button>
-    <button class="lang-btn" data-lang="简">简</button>
-  </div>
+  <!-- Shared datalist for section name suggestions -->
+  <datalist id="sections-datalist"></datalist>
 
-  <!-- FEED FILTER CHIP (shown when filtering by a single source) -->
-  <div id="feed-filter-chip" class="feed-filter-chip hidden"></div>
+  <!-- Language filter hidden -->
+  <div id="lang-filter" class="hidden"></div>
 
   <!-- MAIN FEED -->
   <main id="feed-container">
@@ -120,12 +109,11 @@
   <aside id="settings-panel" class="side-panel hidden">
     <div class="panel-header">
       <h2>⚙️ Sources</h2>
+      <button id="add-feed-btn" class="btn-add-source">+ Add</button>
       <button class="panel-close" data-close="settings-panel">✕</button>
     </div>
 
     <div class="panel-body">
-      <button id="add-feed-btn" class="btn-primary full-width">+ Add Source</button>
-
       <div class="feed-list-header" id="feed-list-toggle" title="Expand / collapse all">
         <span>Your feeds</span>
         <div style="display:flex;align-items:center;gap:0.4rem">
@@ -198,12 +186,7 @@
         <div class="form-row">
           <div class="form-group">
             <label>Section</label>
-            <select id="feed-section-input">
-              <option value="World News">🔥 What's Burning</option>
-              <option value="Tech & AI">🤓 Nerd Alert</option>
-              <option value="Business">💸 Money Stuff</option>
-              <option value="Creators">🎬 Creator Watch</option>
-            </select>
+            <input id="feed-section-input" type="text" list="sections-datalist" placeholder="e.g. World News" autocomplete="off" />
           </div>
           <div class="form-group">
             <label>Language</label>
@@ -275,12 +258,7 @@
         <div class="form-row">
           <div class="form-group">
             <label>Section</label>
-            <select id="edit-feed-section">
-              <option value="World News">🔥 What's Burning</option>
-              <option value="Tech & AI">🤓 Nerd Alert</option>
-              <option value="Business">💸 Money Stuff</option>
-              <option value="Creators">🎬 Creator Watch</option>
-            </select>
+            <input id="edit-feed-section" type="text" list="sections-datalist" placeholder="e.g. World News" autocomplete="off" />
           </div>
           <div class="form-group">
             <label>Language</label>

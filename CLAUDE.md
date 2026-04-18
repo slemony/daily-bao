@@ -21,7 +21,7 @@ app.js           — all logic: Firebase, RSS parsing, Readability, UI
 manifest.json    — PWA manifest (app icon, theme colour, standalone mode)
 firebase.json    — Firebase Hosting + Firestore config
 firestore.rules  — security rules (users own only their own doc)
-.firebaserc      — Firebase project ID reference
+.firebaserc      — Firebase Project ID reference
 README.md        — setup guide for deploying to Firebase
 ```
 
@@ -48,14 +48,30 @@ Each `.article-card` shows:
 ## Feed source filter
 - `activeFeed` global (null = show all) — set by clicking a feed's name in the settings panel
 - Clicking closes the panel and filters `renderFeed()` to that feed's articles only
-- A `#feed-filter-chip` below the lang-filter shows "Showing: [name] ✕"; clicking ✕ clears the filter
+- When active, `#feed-filter-chip` appears inline in the header next to "The Daily Bao" — shows `· [name] ✕`; clicking ✕ clears the filter
 - Active feed item is highlighted with `.feed-item-active` class
 
+## Section / tag system
+- Each feed has a `section` field — a free-form string (e.g. "World News", "Tech & AI", anything user types)
+- Sections are user-defined: the section input in add/edit modals is a text field with `<datalist id="sections-datalist">` showing existing section names as suggestions
+- `renderTabs()` builds nav tabs dynamically from unique sections in `userFeeds`; `updateSectionsDatalist()` keeps the datalist in sync — both called after any feed add/edit/delete/load
+- Section tabs (`#section-tabs`) and language filter (`#lang-filter`) are currently hidden (`class="hidden"`) — sections are managed via settings panel only
+- Each section header in settings has a `✎` rename button (hover to reveal) — renames all feeds in that section in bulk
+- `sectionLabel(s)` is a pass-through (`return s`) — no emoji mapping
+- `isCreator` is URL-based: YouTube (`youtube.com/feeds`) or XHS (`rsshub.app/xiaohongshu`, `rsshub.app/xhslink`) or legacy `feed.section === 'Creators'`
+
 ## Settings panel — feed item actions
+- **"+ Add" button** is in the panel header (compact pill, not full-width row)
 - Edit and Delete buttons are hidden by default (`opacity: 0; pointer-events: none`)
 - **Desktop**: buttons fade in on `.feed-item:hover`
 - **Mobile**: long-press (600ms touchstart timer) adds `.actions-visible` class; tapping outside clears it
 - Clicking the feed name area filters by that feed (separate from the action buttons)
+- **Mobile swipe**: swipe from the right edge of the screen (within 30px) leftward 60px+ opens settings panel
+
+## Mobile UX
+- Swipe right-edge → open settings: touch starts at `startX > window.innerWidth - 30`, drag left ≥ 60px
+- Swipe left-edge of open panel → dismiss: existing `addSwipeToDismiss()` on `#settings-panel`
+- Modals (`#add-feed-modal`, `#edit-feed-modal`) are `max-height: 90vh` with scrollable `.modal-body` — header and footer stay pinned
 
 ## Reader image handling
 - `.reader-prose img` has `height: auto; width: auto` — prevents stretching from explicit HTML attributes
@@ -63,15 +79,6 @@ Each `.article-card` shows:
 
 ## Firebase config
 The `FIREBASE_CONFIG` object at the top of `app.js` is a placeholder. User fills it in from Firebase Console → Project Settings → Your Apps. Do not commit real API keys.
-
-## Sections / feed categories
-- `World News` → 🔥 What's Burning
-- `Tech & AI`  → 🤓 Nerd Alert
-- `Business`   → 💸 Money Stuff
-- `Creators`   → 🎬 Creator Watch (YouTube RSS + XHS via RSSHub)
-
-## Language tags in use
-`EN` `繁` (Traditional Chinese) `简` (Simplified Chinese) `MY` (Malaysian) — plus any user-defined tags
 
 ## YouTube & XHS support
 - YouTube: standard Atom feed `https://www.youtube.com/feeds/videos.xml?channel_id=CHANNEL_ID`
@@ -86,7 +93,6 @@ The `FIREBASE_CONFIG` object at the top of `app.js` is a placeholder. User fills
 ## UI personality / copy to preserve
 - Splash screen silly one-liners (`SPLASH_MSGS` array in app.js) — add more, never remove
 - Loading overlay messages (`LOADING_MSGS` array) — same rule
-- Section emoji names (🔥 What's Burning, 🤓 Nerd Alert, etc.) — keep as-is
 - Theme toggle labels: "☀️ Cope" (dark mode button) · "🌙 Vibe" (light mode button)
 - App logo: 🍞 emoji, "The Daily Bao" in DM Serif Display font
 
@@ -102,4 +108,4 @@ The `FIREBASE_CONFIG` object at the top of `app.js` is a placeholder. User fills
 - Do not split into multiple JS files without asking
 - Do not add Cloud Functions — keep everything on the free Spark plan
 - Do not store articles in Firestore — only user feed config
-- Do not remove the personality copy (loading messages, section names, tagline)
+- Do not remove the personality copy (loading messages, tagline)

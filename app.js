@@ -260,6 +260,8 @@ async function loadUserFeeds() {
     showToast('⚠️ Could not load your feeds from cloud — showing defaults');
   }
   renderFeedList();
+  renderTabs();
+  updateSectionsDatalist();
 }
 
 async function saveUserFeeds() {
@@ -321,7 +323,7 @@ async function parseRSS(xmlText, feed) {
       date:      item.isoDate ? new Date(item.isoDate) : (item.pubDate ? new Date(item.pubDate) : null),
       videoId,
       thumbnail,
-      isCreator: feed.section === 'Creators',
+      isCreator: feed.url.includes('youtube.com/feeds') || feed.url.includes('rsshub.app/xiaohongshu') || feed.url.includes('rsshub.app/xhslink') || feed.section === 'Creators',
     };
   }).filter(Boolean);
 }
@@ -358,7 +360,7 @@ function parseRss2json(json, feed) {
       date:      item.pubDate ? new Date(item.pubDate) : null,
       videoId:   '',
       thumbnail,
-      isCreator: feed.section === 'Creators',
+      isCreator: feed.url.includes('youtube.com/feeds') || feed.url.includes('rsshub.app/xiaohongshu') || feed.url.includes('rsshub.app/xhslink') || feed.section === 'Creators',
     };
   }).filter(Boolean);
 }
@@ -496,7 +498,7 @@ function renderFeed() {
   if (chip) {
     if (activeFeed) {
       const feed = userFeeds.find(f => f.id === activeFeed);
-      chip.innerHTML = `${esc(feed?.name || activeFeed)} <button class="chip-clear" aria-label="Clear filter">✕</button>`;
+      chip.innerHTML = `<span class="chip-name">${esc(feed?.name || activeFeed)}</span><button class="chip-clear" aria-label="Clear filter">✕</button>`;
       chip.classList.remove('hidden');
       chip.querySelector('.chip-clear').addEventListener('click', () => {
         activeFeed = null;
@@ -729,6 +731,10 @@ async function openReader(article) {
     base.href = article.link;
     htmlDoc.head.appendChild(base);
 
+    const pageTitle = htmlDoc.title || '';
+    if (/security checkpoint|just a moment|attention required|ddos|vercel security/i.test(pageTitle))
+      throw new Error(`Security checkpoint: "${pageTitle}"`);
+
     // Use Readability
     const { Readability } = await import('https://cdn.jsdelivr.net/npm/@mozilla/readability@0.5.0/+esm');
     const reader = new Readability(htmlDoc);
@@ -788,7 +794,46 @@ function renderFeedList() {
     details.open = true;
 
     const summary = document.createElement('summary');
-    summary.innerHTML = `<span>${esc(sectionLabel(secName))}</span><span class="feed-section-count">${feeds.length}</span>`;
+    const labelSpan = document.createElement('span');
+    labelSpan.textContent = sectionLabel(secName);
+    const countSpan = document.createElement('span');
+    countSpan.className = 'feed-section-count';
+    countSpan.textContent = feeds.length;
+    const renameBtn = document.createElement('button');
+    renameBtn.className = 'btn-rename-section';
+    renameBtn.title = 'Rename section';
+    renameBtn.textContent = '✎';
+    renameBtn.addEventListener('click', e => {
+      e.preventDefault(); e.stopPropagation();
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.value = secName;
+      input.className = 'section-rename-input';
+      labelSpan.replaceWith(input);
+      input.focus(); input.select();
+      const commit = async () => {
+        const newName = input.value.trim();
+        if (newName && newName !== secName) {
+          if (activeSection === secName) activeSection = newName;
+          userFeeds = userFeeds.map(f => f.section === secName ? { ...f, section: newName } : f);
+          await saveUserFeeds();
+          renderFeedList();
+          renderTabs();
+          updateSectionsDatalist();
+          renderFeed();
+        } else {
+          input.replaceWith(labelSpan);
+        }
+      };
+      input.addEventListener('blur', commit);
+      input.addEventListener('keydown', ev => {
+        if (ev.key === 'Enter') { ev.preventDefault(); input.blur(); }
+        if (ev.key === 'Escape') { ev.preventDefault(); input.replaceWith(labelSpan); }
+      });
+    });
+    summary.appendChild(labelSpan);
+    summary.appendChild(renameBtn);
+    summary.appendChild(countSpan);
     details.appendChild(summary);
 
     feeds.forEach(feed => {
@@ -851,6 +896,8 @@ async function removeFeed(feedId) {
   userFeeds = userFeeds.filter(f => f.id !== feedId);
   await saveUserFeeds();
   renderFeedList();
+  renderTabs();
+  updateSectionsDatalist();
   allArticles = allArticles.filter(a => a.feedId !== feedId);
   renderFeed();
 }
@@ -912,6 +959,8 @@ document.getElementById('save-edit-btn').addEventListener('click', async () => {
 
   await saveUserFeeds();
   renderFeedList();
+  renderTabs();
+  updateSectionsDatalist();
   renderFeed();
   closeModal('edit-feed-modal');
 });
@@ -1071,6 +1120,8 @@ document.getElementById('save-feed-btn').addEventListener('click', async () => {
   btn.disabled = false;
   btn.textContent = origLabel;
   renderFeedList();
+  renderTabs();
+  updateSectionsDatalist();
   closeModal('add-feed-modal');
   openPanel('settings-panel');
 
@@ -1208,6 +1259,30 @@ function addSwipeToDismiss(panel) {
 addSwipeToDismiss(document.getElementById('reader-panel'));
 addSwipeToDismiss(document.getElementById('settings-panel'));
 
+// Swipe from right edge of screen → open settings panel
+(function addSwipeToOpen() {
+  let startX = 0, startY = 0, armed = false;
+  document.body.addEventListener('touchstart', e => {
+    const panel = document.getElementById('settings-panel');
+    if (panel.classList.contains('open')) { armed = false; return; }
+    startX = e.touches[0].clientX;
+    startY = e.touches[0].clientY;
+    armed = startX > window.innerWidth - 30;
+  }, { passive: true });
+  document.body.addEventListener('touchmove', e => {
+    if (!armed) return;
+    const dy = Math.abs(e.touches[0].clientY - startY);
+    const dx = e.touches[0].clientX - startX;
+    if (dy > Math.abs(dx)) armed = false;
+  }, { passive: true });
+  document.body.addEventListener('touchend', e => {
+    if (!armed) return;
+    armed = false;
+    const dx = e.changedTouches[0].clientX - startX;
+    if (dx < -60) { renderFeedList(); openPanel('settings-panel'); }
+  }, { passive: true });
+})();
+
 // Close modal on backdrop click
 document.getElementById('add-feed-modal').addEventListener('click', e => {
   if (e.target === document.getElementById('add-feed-modal')) closeModal('add-feed-modal');
@@ -1223,14 +1298,62 @@ document.addEventListener('touchstart', e => {
 // =====================================================
 // TABS & FILTERS
 // =====================================================
-document.querySelectorAll('.tab').forEach(tab => {
-  tab.addEventListener('click', () => {
-    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-    tab.classList.add('active');
-    activeSection = tab.dataset.section;
-    renderFeed();
+function handleTabClick(e) {
+  document.querySelectorAll('#section-tabs .tab').forEach(t => t.classList.remove('active'));
+  e.currentTarget.classList.add('active');
+  activeSection = e.currentTarget.dataset.section;
+  renderFeed();
+}
+
+function renderTabs() {
+  const nav = document.getElementById('section-tabs');
+  nav.querySelectorAll('.tab:not([data-section="all"])').forEach(t => t.remove());
+
+  const seen = new Set();
+  userFeeds.forEach(f => {
+    const sec = f.section || 'Other';
+    if (!seen.has(sec)) {
+      seen.add(sec);
+      const btn = document.createElement('button');
+      btn.className = 'tab';
+      btn.dataset.section = sec;
+      btn.textContent = sectionLabel(sec);
+      btn.addEventListener('click', handleTabClick);
+      nav.appendChild(btn);
+    }
   });
-});
+
+  // Wire up the static "All" tab (may not exist if nav is hidden)
+  const allTab = nav.querySelector('.tab[data-section="all"]');
+  if (allTab) allTab.onclick = handleTabClick;
+
+  // Restore active state
+  let restored = false;
+  nav.querySelectorAll('.tab').forEach(t => {
+    if (t.dataset.section === activeSection) { t.classList.add('active'); restored = true; }
+    else t.classList.remove('active');
+  });
+  if (!restored) {
+    activeSection = 'all';
+    if (allTab) allTab.classList.add('active');
+  }
+}
+
+function updateSectionsDatalist() {
+  const dl = document.getElementById('sections-datalist');
+  if (!dl) return;
+  dl.innerHTML = '';
+  const seen = new Set();
+  userFeeds.forEach(f => {
+    const sec = f.section || 'Other';
+    if (!seen.has(sec)) {
+      seen.add(sec);
+      const opt = document.createElement('option');
+      opt.value = sec;
+      dl.appendChild(opt);
+    }
+  });
+}
 
 document.querySelectorAll('.lang-btn').forEach(btn => {
   btn.addEventListener('click', () => {
@@ -1308,15 +1431,7 @@ function formatDateFull(date) {
   return date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
-function sectionLabel(s) {
-  const map = {
-    'World News': '🔥 What\'s Burning',
-    'Tech & AI':  '🤓 Nerd Alert',
-    'Business':   '💸 Money Stuff',
-    'Creators':   '🎬 Creator Watch',
-  };
-  return map[s] || s;
-}
+function sectionLabel(s) { return s; }
 
 // =====================================================
 // PULL-TO-REFRESH
