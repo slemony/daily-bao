@@ -27,6 +27,7 @@ README.md        — setup guide for deploying to Firebase
 
 ## Key design decisions
 - **No build step** — deploy with `firebase deploy`, edit files directly
+- **CI/CD** — pushing to `main` on GitHub auto-deploys to Firebase Hosting via GitHub Actions
 - **No backend / Cloud Functions** — stays on Firebase free Spark plan
 - **CORS proxies raced in parallel** — all three proxies fire simultaneously; fastest response wins
 - **localStorage article cache** — same-day loads skip network entirely; stale cache shows instantly then refreshes in background
