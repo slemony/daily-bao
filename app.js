@@ -537,12 +537,44 @@ const READER_FOOTER_RE = /^\s*(learn more|read more|continue reading|view (the )
 function cleanReaderContent(html, bylineText) {
   const tpl = document.createElement('template');
   tpl.innerHTML = html;
-  const root = tpl.content;
+
+  // Readability often wraps everything in a single <div>. Descend into
+  // single-child wrappers so later passes operate on real paragraphs,
+  // not the whole article wrapper (which would strip the entire body).
+  let root = tpl.content;
+  while (root.children && root.children.length === 1 &&
+         ['DIV', 'ARTICLE', 'SECTION', 'MAIN'].includes(root.firstElementChild.tagName)) {
+    root = root.firstElementChild;
+  }
 
   const textOf = el => (el.textContent || '').replace(/\s+/g, ' ').trim();
   const norm = s => s.toLowerCase().replace(/\s+/g, ' ').trim();
 
+  // Replace lazy-loaded placeholder images (BBC, NYT, etc.) with their real src.
+  tpl.content.querySelectorAll('img').forEach(img => {
+    const src = img.getAttribute('src') || '';
+    const lazy = img.getAttribute('data-src') ||
+                 img.getAttribute('data-lazy-src') ||
+                 img.getAttribute('data-original') ||
+                 img.getAttribute('data-img-src') || '';
+    const isPlaceholder = !src ||
+                          src.startsWith('data:image/gif;base64,R0lGOD') ||
+                          (src.startsWith('data:') && src.length < 200);
+    if (!isPlaceholder) return;
+    if (lazy) { img.setAttribute('src', lazy); return; }
+    const srcset = img.getAttribute('srcset') || img.getAttribute('data-srcset') || '';
+    if (srcset) {
+      const firstUrl = srcset.split(',')[0].trim().split(/\s+/)[0];
+      if (firstUrl && !firstUrl.startsWith('data:')) {
+        img.setAttribute('src', firstUrl);
+        return;
+      }
+    }
+    img.remove();
+  });
+
   // Pass A: strip duplicate byline / preamble from the first 3 elements.
+  // Length guard prevents matching the whole article wrapper accidentally.
   const byline = norm(bylineText || '');
   let checked = 0;
   while (root.firstElementChild && checked < 3) {
@@ -550,7 +582,7 @@ function cleanReaderContent(html, bylineText) {
     const text = textOf(el);
     const lower = norm(text);
     const looksLikePreamble = /^(by |updated |published |posted |written by )/i.test(text) && text.length < 160;
-    const matchesByline = byline && byline.length > 3 && lower.includes(byline);
+    const matchesByline = byline && byline.length > 3 && lower.includes(byline) && text.length < 200;
     if (looksLikePreamble || matchesByline) {
       el.remove();
       checked++;
@@ -567,7 +599,6 @@ function cleanReaderContent(html, bylineText) {
     if (!text && tag !== 'IMG' && tag !== 'FIGURE') { el.remove(); continue; }
     if (tag === 'HR') { el.remove(); continue; }
     if (READER_FOOTER_RE.test(text) && text.length < 200) { el.remove(); continue; }
-    // Single-link paragraph whose only text is a footer phrase
     const links = el.querySelectorAll ? el.querySelectorAll('a') : [];
     if (links.length === 1 && textOf(links[0]) === text && READER_FOOTER_RE.test(text)) {
       el.remove();
@@ -576,9 +607,7 @@ function cleanReaderContent(html, bylineText) {
     break;
   }
 
-  const out = document.createElement('div');
-  out.appendChild(root);
-  return out.innerHTML;
+  return tpl.innerHTML;
 }
 
 async function openReader(article) {
