@@ -1150,7 +1150,7 @@ button { cursor: pointer; font-family: var(--font-main); border: none; backgroun
 [data-theme="dark"] .reader-prose { color: #e8e4d8; }
 
 .reader-prose p {
-  margin: 0 0 0.4em;
+  margin: 0 0 0.9em;
 }
 
 /* First-line indent for every paragraph after the first */
@@ -1162,9 +1162,10 @@ button { cursor: pointer; font-family: var(--font-main); border: none; backgroun
 .reader-prose > p:first-child::first-letter {
   float: left;
   font-family: var(--font-serif-display);
-  font-size: 3.6em;
-  line-height: 0.85;
-  padding: 0.05em 0.08em 0 0;
+  font-size: 5.2em;
+  line-height: 0.82;
+  padding: 0.02em 0.1em 0 0;
+  margin-top: 0.05em;
   color: var(--accent);
   font-weight: 400;
 }
