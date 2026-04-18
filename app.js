@@ -622,7 +622,10 @@ function cleanReaderContent(html, bylineText) {
                  img.getAttribute('data-img-src') || '';
     const isPlaceholder = !src ||
                           src.startsWith('data:image/gif;base64,R0lGOD') ||
-                          (src.startsWith('data:') && src.length < 200);
+                          (src.startsWith('data:') && src.length < 200) ||
+                          src.includes('grey-placeholder') ||
+                          src.includes('placeholder.png') ||
+                          /bbci\.co\.uk.*placeholder/i.test(src);
     if (!isPlaceholder) return;
     if (lazy) { img.setAttribute('src', lazy); return; }
     const srcset = img.getAttribute('srcset') || img.getAttribute('data-srcset') || '';
