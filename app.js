@@ -1069,10 +1069,21 @@ document.getElementById('detect-feed-btn').addEventListener('click', async () =>
     status.textContent = '✓ RSS feed found!';
     status.className   = 'detect-status success';
   } catch (e) {
-    status.textContent = '✗ Could not detect RSS. Try pasting the direct RSS URL.';
-    status.className   = 'detect-status error';
+    if (looksLikeRssUrl(url)) {
+      const normalized = url.startsWith('http') ? url : `https://${url}`;
+      document.getElementById('feed-url-input').value = normalized;
+      status.textContent = '⚠ Can\u2019t verify (might be a private/tokenized feed). Click Add Source to save it anyway.';
+      status.className   = 'detect-status warn';
+    } else {
+      status.textContent = '✗ Could not detect RSS. Try pasting the direct RSS URL.';
+      status.className   = 'detect-status error';
+    }
   }
 });
+
+function looksLikeRssUrl(url) {
+  return /\/feed(\/|$|\.)|\/rss(\/|$|\.)|\.xml(\?|$)|\/atom(\/|$|\.)/i.test(url);
+}
 
 async function resolveXhsShortLink(shortUrl) {
   // allorigins /get returns JSON with finalUrl (the URL after all redirects)
