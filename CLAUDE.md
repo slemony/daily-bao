@@ -6,13 +6,15 @@ A personal news reader web app that replaces social media. Free, cloud-hosted on
 ## Tech stack
 - **Frontend**: Vanilla HTML + CSS + JS (no build tools, no framework)
 - **Auth**: Firebase Auth — Google Sign-in only
-- **Database**: Firestore — stores per-user feed config (`/users/{uid}` → `{ feeds: [...] }`)
+- **Database**: Firestore — stores per-user feed config (`/users/{uid}` → `{ feeds: [...], categories: [...] }`). `categories` is the list of user-created section names, including empty ones that have no feeds yet
 - **Hosting**: Firebase Hosting (`firebase deploy`)
 - **RSS fetching**: Client-side — direct fetch + 3 CORS proxies (allorigins, codetabs, cors.lol) raced with `Promise.any`, 8s timeout; rss2json.com as final fallback if all fail
 - **RSS parsing**: `rss-parser@3` loaded from jsDelivr CDN (global `RSSParser`); handles `content:encoded`, Atom `<content>`, CDATA, Media RSS
 - **Article reader**: Mozilla Readability.js loaded from jsDelivr CDN (preloaded silently after first feed fetch)
 - **Article cache**: `localStorage` key `dailybao_feed_cache` — same-day cache, stale-while-revalidate on new day
 - **YouTube shorts cache**: `localStorage` key `dailybao_yt_short_cache` — maps `videoId` → `isShort` boolean, populated via YouTube oEmbed thumbnail aspect ratio, capped at 2000 entries (FIFO trim)
+- **Read-progress store**: `localStorage` key `dailybao_read_progress` — maps article `link` → `{pct, scrollTop, scrollHeight, elapsedMs, lastAt, …article meta}`, 42h TTL, deleted when pct ≥ 0.95. Populated by the reader scroll listener; `purgeExpiredProgress()` runs on auth
+- **Podcast audio state**: `localStorage` key `dailybao_audio_state` — playback position + rate, saved every 3s during playback
 
 ## File structure
 ```
@@ -53,12 +55,32 @@ Each `.article-card` shows:
 - Active feed item is highlighted with `.feed-item-active` class
 - Scroll-to-top is only wired to filter clicks, NOT inside `renderFeed()` — background refresh must not disrupt scroll position
 
+## Podcast audio player
+- `<div id="audio-player">` in `index.html` is a persistent sticky bottom bar with a hidden `<audio id="audio-el">` inside. Survives reader dismissal — the user can browse the feed while listening
+- Articles expose `article.audio = {url, type, length}` when an RSS `<enclosure>` with `type="audio/*"` (or no type) is found. Parsed in both `parseRSS()` (rss-parser: `item.enclosure.url`) and `parseRss2json()` (rss2json: `item.enclosure.link`)
+- Podcast cards show a `🎧 Podcast` badge; the reader renders a `🎧 Play podcast` button above the article. Opening a podcast article auto-starts playback (user gesture from the card click satisfies autoplay policy)
+- `playPodcast(article)`, `togglePodcast()`, `closePodcast()` manage state. Controls: play/pause, back 15s, forward 30s, rate toggle (1/1.25/1.5/2/0.75×), close, scrubber
+- **MediaSession API** registered (`play`, `pause`, `seekbackward`, `seekforward`, `seekto`, `stop`) for lock-screen / notification / bluetooth remote controls. Metadata (title, artist=feedName, album=section, artwork=thumbnail) set on every track load
+- `body.audio-active` adds bottom padding to `#feed-container` and `.reader-body` so the sticky bar doesn't cover content
+
+## Read progress / Continue Reading
+- Scroll in `.reader-body` is tracked by `startReadSession(article)` which sets up a scroll listener + 5s timer. `persistProgress()` writes to `dailybao_read_progress` only when elapsed reading time ≥ 60s AND pct < 0.95. When pct crosses 0.95, the entry is deleted (article finished)
+- `endReadSession()` is called on reader back, backdrop dismiss, `pagehide`, and the next `openReader` call. Visibility changes pause/resume the elapsed-time counter
+- On reader open, `restoreProgressScroll(article)` re-applies the saved scroll position on next animation frame using the current `scrollHeight` × saved `pct` (falls back to raw `scrollTop` if no dimensions)
+- Side panel "📖 Continue reading" block (`#continue-reading-block`) is hidden when empty; otherwise shows unfinished articles sorted by `lastAt desc`, each with title, feed, %, last-read time, delete ✕ button. Clicking re-opens the reader from cached metadata so it works even if the article has fallen out of `allArticles`
+
+## Body scroll lock
+- `body.body-locked { overflow: hidden }` prevents the background feed's scrollbar from showing through the reader or settings panel. Toggled by `openPanel`, `openModal`, `closePanel`, `closeModal`, and `updateBodyLock()` (called whenever any overlay closes)
+
 ## Section / tag system
 - Each feed has a `section` field — a free-form string (e.g. "World News", "Tech & AI", anything user types)
 - Sections are user-defined: the section input in add/edit modals is a text field with `<datalist id="sections-datalist">` showing existing section names as suggestions
 - `renderTabs()` builds nav tabs dynamically from unique sections in `userFeeds`; `updateSectionsDatalist()` keeps the datalist in sync — both called after any feed add/edit/delete/load
 - Section tabs (`#section-tabs`) and language filter (`#lang-filter`) are currently hidden (`class="hidden"`) — sections are managed via settings panel only
-- Each section header in settings has a `✎` rename button (hover to reveal) — renames all feeds in that section in bulk
+- Each section header in settings has a `✎` rename button (hover to reveal) — renames all feeds in that section in bulk; empty categories also show a 🗑 button to delete them
+- Clicking a section label in the settings panel filters the feed to that section (sets `activeSection`), closes the panel, and shows the section chip in the header with a ✕ clear button. Same chip slot is reused for both feed and section filters (only one active at a time)
+- A **`+ New category`** button below the feed list lets users add empty categories (e.g. Sports, Gaming) that persist in Firestore `categories[]` even before any feeds use them
+- Feed items are HTML5-draggable within and across categories. Dropping on a feed item reorders it (above/below based on cursor Y) and reassigns its `section` to the target's section. Visual drop indicators via `.feed-item.drop-above` / `.drop-below`
 - `sectionLabel(s)` is a pass-through (`return s`) — no emoji mapping
 - `isCreator` is URL-based: YouTube (`youtube.com/feeds`) or XHS (`rsshub.app/xiaohongshu`, `rsshub.app/xhslink`) or legacy `feed.section === 'Creators'`
 

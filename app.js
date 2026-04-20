@@ -126,13 +126,14 @@ const auth        = getAuth(firebaseApp);
 const db          = getFirestore(firebaseApp);
 const provider    = new GoogleAuthProvider();
 
-let currentUser  = null;
-let userFeeds    = [];
-let allArticles  = [];    // flat array of fetched articles
-let activeSection = 'all';
-let activeLang    = 'all';
-let activeFeed    = null;
-let readerOpen    = false;
+let currentUser     = null;
+let userFeeds       = [];
+let userCategories  = [];  // user-created section names (includes empty ones)
+let allArticles     = [];  // flat array of fetched articles
+let activeSection   = 'all';
+let activeLang      = 'all';
+let activeFeed      = null;
+let readerOpen      = false;
 
 // =====================================================
 // ARTICLE CACHE (localStorage)
@@ -176,6 +177,7 @@ onAuthStateChanged(auth, async user => {
   if (user) {
     currentUser = user;
     showApp(user);
+    purgeExpiredProgress();
     await loadUserFeeds();
 
     const cache = loadCache(user.uid);
@@ -249,14 +251,18 @@ async function loadUserFeeds() {
     const ref = doc(db, 'users', currentUser.uid);
     const snap = await getDoc(ref);
     if (snap.exists()) {
-      userFeeds = snap.data().feeds || DEFAULT_FEEDS;
+      const data = snap.data();
+      userFeeds      = data.feeds || DEFAULT_FEEDS;
+      userCategories = Array.isArray(data.categories) ? data.categories : [];
     } else {
       userFeeds = [...DEFAULT_FEEDS];
+      userCategories = [];
       await saveUserFeeds();
     }
   } catch (e) {
     console.warn('Firestore unavailable, using defaults:', e.message);
     userFeeds = [...DEFAULT_FEEDS];
+    userCategories = [];
     showToast('⚠️ Could not load your feeds from cloud — showing defaults');
   }
   renderFeedList();
@@ -267,7 +273,7 @@ async function loadUserFeeds() {
 async function saveUserFeeds() {
   try {
     const ref = doc(db, 'users', currentUser.uid);
-    await setDoc(ref, { feeds: userFeeds }, { merge: true });
+    await setDoc(ref, { feeds: userFeeds, categories: userCategories }, { merge: true });
   } catch (e) {
     console.warn('Could not save feeds:', e.message);
   }
@@ -309,6 +315,12 @@ async function parseRSS(xmlText, feed) {
     let feedDomain = '';
     try { feedDomain = new URL(feed.url).hostname.replace(/^www\./, ''); } catch {}
 
+    let audio = null;
+    const enc = item.enclosure;
+    if (enc && enc.url && (!enc.type || /^audio\//i.test(enc.type))) {
+      audio = { url: enc.url, type: enc.type || 'audio/mpeg', length: enc.length || '' };
+    }
+
     return {
       id:        `${feed.id}-${link}`,
       feedId:    feed.id,
@@ -323,6 +335,7 @@ async function parseRSS(xmlText, feed) {
       date:      item.isoDate ? new Date(item.isoDate) : (item.pubDate ? new Date(item.pubDate) : null),
       videoId,
       thumbnail,
+      audio,
       isCreator: feed.url.includes('youtube.com/feeds') || feed.url.includes('rsshub.app/xiaohongshu') || feed.url.includes('rsshub.app/xhslink') || feed.section === 'Creators',
     };
   }).filter(Boolean);
@@ -351,6 +364,12 @@ async function parseRss2json(json, feed) {
     const vm = link.match(/[?&]v=([\w-]{6,})/);
     if (vm) videoId = vm[1];
 
+    let audio = null;
+    const enc = item.enclosure;
+    if (enc && enc.link && (!enc.type || /^audio\//i.test(enc.type))) {
+      audio = { url: enc.link, type: enc.type || 'audio/mpeg', length: enc.length || '' };
+    }
+
     return {
       id:        `${feed.id}-${link}`,
       feedId:    feed.id,
@@ -365,6 +384,7 @@ async function parseRss2json(json, feed) {
       date:      item.pubDate ? new Date(item.pubDate) : null,
       videoId,
       thumbnail,
+      audio,
       isCreator: feed.url.includes('youtube.com/feeds') || feed.url.includes('rsshub.app/xiaohongshu') || feed.url.includes('rsshub.app/xhslink') || feed.section === 'Creators',
     };
   }).filter(Boolean);
@@ -499,15 +519,24 @@ function renderFeed() {
   if (activeLang !== 'all')    articles = articles.filter(a => a.lang === activeLang);
   if (activeFeed)              articles = articles.filter(a => a.feedId === activeFeed);
 
-  // Update filter chip
+  // Update filter chip — shows either the feed filter or the section filter.
   const chip = document.getElementById('feed-filter-chip');
   if (chip) {
+    let label = '';
+    let clearFn = null;
     if (activeFeed) {
       const feed = userFeeds.find(f => f.id === activeFeed);
-      chip.innerHTML = `<span class="chip-name">${esc(feed?.name || activeFeed)}</span><button class="chip-clear" aria-label="Clear filter">✕</button>`;
+      label   = feed?.name || activeFeed;
+      clearFn = () => { activeFeed = null; };
+    } else if (activeSection && activeSection !== 'all') {
+      label   = `# ${activeSection}`;
+      clearFn = () => { activeSection = 'all'; renderTabs(); };
+    }
+    if (label) {
+      chip.innerHTML = `<span class="chip-name">${esc(label)}</span><button class="chip-clear" aria-label="Clear filter">✕</button>`;
       chip.classList.remove('hidden');
       chip.querySelector('.chip-clear').addEventListener('click', () => {
-        activeFeed = null;
+        clearFn();
         renderFeedList();
         renderFeed();
         window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -548,6 +577,7 @@ function buildArticleCard(a, i) {
       ${faviconUrl ? `<img class="card-favicon" src="${esc(faviconUrl)}" alt="" loading="lazy" onerror="this.remove()">` : ''}
       <span class="card-source">${esc(a.feedName)}</span>
       ${a.author ? `<span class="card-author">· ${esc(a.author)}</span>` : ''}
+      ${a.audio ? `<span class="card-podcast-badge">🎧 Podcast</span>` : ''}
       <span class="card-date-top">${a.date ? formatDate(a.date) : ''}</span>
     </div>
     <div class="card-body-row">
@@ -727,6 +757,7 @@ function cleanReaderContent(html, bylineText) {
 }
 
 async function openReader(article) {
+  endReadSession({ silent: true });
   const panel = document.getElementById('reader-panel');
   const readerContent  = document.getElementById('reader-content');
   const readerLoading  = document.getElementById('reader-loading');
@@ -747,6 +778,10 @@ async function openReader(article) {
   document.getElementById('reader-time').textContent   = '';
 
   openPanel('reader-panel');
+  document.getElementById('reader-body').scrollTop = 0;
+
+  // Podcast: auto-start the sticky player so audio survives reader dismiss
+  if (article.audio?.url) playPodcast(article);
 
   // YouTube
   if (article.videoId) {
@@ -800,13 +835,20 @@ async function openReader(article) {
     readerContent.innerHTML = `
       <h1>${esc(parsed.title || article.title)}</h1>
       ${parsed.byline ? `<p class="reader-byline">${esc(parsed.byline)}</p>` : ''}
+      ${article.audio?.url ? `<button class="reader-play-inline" type="button">🎧 Play podcast</button>` : ''}
       <hr class="reader-rule">
       <div class="${proseClass}">${cleanedContent}</div>
     `;
+    if (article.audio?.url) {
+      readerContent.querySelector('.reader-play-inline')?.addEventListener('click', () => playPodcast(article));
+    }
 
     readerLoading.classList.add('hidden');
     readerContent.classList.remove('hidden');
     document.getElementById('reader-body').scrollTop = 0;
+
+    startReadSession(article);
+    restoreProgressScroll(article);
 
   } catch (e) {
     console.warn('Reader failed:', e.message);
@@ -817,6 +859,382 @@ async function openReader(article) {
 }
 
 // =====================================================
+// READ PROGRESS (Continue Reading)
+// =====================================================
+// Stored as { [link]: { pct, scrollTop, scrollHeight, elapsedMs, lastAt,
+//   title, feedName, feedId, feedDomain, lang, section, thumbnail,
+//   videoId, audio, author, summary, date, isCreator } }
+// TTL 42h, deleted when pct >= PROGRESS_DONE_THRESHOLD, only saved when
+// the reader has been active for >= PROGRESS_MIN_MS.
+const PROGRESS_KEY = 'dailybao_read_progress';
+const PROGRESS_TTL_MS = 42 * 60 * 60 * 1000;
+const PROGRESS_MIN_MS = 60 * 1000;
+const PROGRESS_DONE_THRESHOLD = 0.95;
+
+let readSession = null; // { article, openedAt, elapsedMs, visibleAt, raf }
+
+function loadProgress() {
+  try {
+    const raw = localStorage.getItem(PROGRESS_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch { return {}; }
+}
+
+function saveProgressMap(map) {
+  try { localStorage.setItem(PROGRESS_KEY, JSON.stringify(map)); } catch {}
+}
+
+function purgeExpiredProgress() {
+  const map = loadProgress();
+  const now = Date.now();
+  let changed = false;
+  for (const [k, v] of Object.entries(map)) {
+    if (!v?.lastAt || now - v.lastAt > PROGRESS_TTL_MS) {
+      delete map[k];
+      changed = true;
+    }
+  }
+  if (changed) saveProgressMap(map);
+}
+
+function getProgress(link) {
+  const map = loadProgress();
+  const entry = map[link];
+  if (!entry) return null;
+  if (Date.now() - (entry.lastAt || 0) > PROGRESS_TTL_MS) return null;
+  if ((entry.pct || 0) >= PROGRESS_DONE_THRESHOLD) return null;
+  return entry;
+}
+
+function removeProgress(link) {
+  const map = loadProgress();
+  if (!map[link]) return;
+  delete map[link];
+  saveProgressMap(map);
+}
+
+function persistProgress({ finalize = false } = {}) {
+  if (!readSession) return;
+  const { article } = readSession;
+  if (!article?.link) return;
+
+  const body = document.getElementById('reader-body');
+  if (!body) return;
+  const scrollTop    = body.scrollTop;
+  const scrollHeight = body.scrollHeight - body.clientHeight;
+  const pct = scrollHeight > 0 ? Math.max(0, Math.min(1, scrollTop / scrollHeight)) : 0;
+
+  // Accumulate elapsed time while the tab is visible and reader is open
+  if (readSession.visibleAt) {
+    readSession.elapsedMs += Date.now() - readSession.visibleAt;
+    readSession.visibleAt = Date.now();
+  }
+
+  if (pct >= PROGRESS_DONE_THRESHOLD) {
+    removeProgress(article.link);
+    return;
+  }
+  if (readSession.elapsedMs < PROGRESS_MIN_MS && !finalize) return;
+  if (readSession.elapsedMs < PROGRESS_MIN_MS && finalize) return;
+
+  const map = loadProgress();
+  map[article.link] = {
+    pct,
+    scrollTop,
+    scrollHeight,
+    elapsedMs: readSession.elapsedMs,
+    lastAt:   Date.now(),
+    title:    article.title,
+    feedId:   article.feedId,
+    feedName: article.feedName,
+    feedDomain: article.feedDomain,
+    lang:     article.lang,
+    section:  article.section,
+    thumbnail: article.thumbnail || '',
+    videoId:  article.videoId || '',
+    audio:    article.audio || null,
+    author:   article.author || '',
+    summary:  article.summary || '',
+    date:     article.date ? (article.date instanceof Date ? article.date.toISOString() : article.date) : null,
+    link:     article.link,
+    isCreator: !!article.isCreator,
+  };
+  saveProgressMap(map);
+}
+
+function startReadSession(article) {
+  endReadSession({ silent: true });
+  readSession = {
+    article,
+    openedAt:  Date.now(),
+    elapsedMs: 0,
+    visibleAt: document.visibilityState === 'visible' ? Date.now() : null,
+  };
+
+  const body = document.getElementById('reader-body');
+  if (!body) return;
+  const onScroll = () => persistProgress();
+  body.addEventListener('scroll', onScroll, { passive: true });
+  readSession.cleanup = () => body.removeEventListener('scroll', onScroll);
+
+  // Tick every 5s so time-spent persists even without scrolling
+  readSession.timer = setInterval(() => persistProgress(), 5000);
+}
+
+function endReadSession(opts = {}) {
+  if (!readSession) return;
+  if (!opts.silent) persistProgress({ finalize: true });
+  if (readSession.cleanup) readSession.cleanup();
+  if (readSession.timer) clearInterval(readSession.timer);
+  readSession = null;
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (!readSession) return;
+  if (document.visibilityState === 'visible') {
+    readSession.visibleAt = Date.now();
+  } else {
+    if (readSession.visibleAt) {
+      readSession.elapsedMs += Date.now() - readSession.visibleAt;
+      readSession.visibleAt = null;
+    }
+    persistProgress();
+  }
+});
+
+window.addEventListener('pagehide', () => persistProgress({ finalize: true }));
+
+function renderContinueReading() {
+  purgeExpiredProgress();
+  const block = document.getElementById('continue-reading-block');
+  const list  = document.getElementById('continue-list');
+  const count = document.getElementById('continue-count');
+  if (!block || !list) return;
+
+  const map = loadProgress();
+  const entries = Object.values(map)
+    .filter(e => (e.pct || 0) < PROGRESS_DONE_THRESHOLD)
+    .sort((a, b) => (b.lastAt || 0) - (a.lastAt || 0));
+
+  if (entries.length === 0) {
+    block.hidden = true;
+    return;
+  }
+
+  block.hidden = false;
+  count.textContent = entries.length;
+  block.open = true;
+  list.innerHTML = '';
+
+  entries.forEach(e => {
+    const item = document.createElement('div');
+    item.className = 'continue-item';
+    const pct = Math.round((e.pct || 0) * 100);
+    const ago = e.lastAt ? formatDate(new Date(e.lastAt)) : '';
+    item.innerHTML = `
+      <div class="continue-body">
+        <div class="continue-title">${esc(e.title || e.link)}</div>
+        <div class="continue-meta">
+          <span>${esc(e.feedName || '')}</span>
+          ${ago ? `<span>· ${esc(ago)}</span>` : ''}
+          <span>· ${pct}%</span>
+        </div>
+        <div class="continue-progress"><div class="continue-progress-bar" style="width:${pct}%"></div></div>
+      </div>
+      <button class="btn-continue-remove" title="Remove from list">✕</button>
+    `;
+    item.addEventListener('click', ev => {
+      if (ev.target.closest('.btn-continue-remove')) return;
+      closePanel('settings-panel');
+      const article = {
+        id:         `continue-${e.link}`,
+        feedId:     e.feedId,
+        feedName:   e.feedName || '',
+        feedDomain: e.feedDomain || '',
+        lang:       e.lang || '',
+        section:    e.section || '',
+        title:      e.title || '',
+        summary:    e.summary || '',
+        link:       e.link,
+        author:     e.author || '',
+        date:       e.date ? new Date(e.date) : null,
+        videoId:    e.videoId || '',
+        thumbnail:  e.thumbnail || '',
+        audio:      e.audio || null,
+        isCreator:  !!e.isCreator,
+      };
+      openReader(article);
+    });
+    item.querySelector('.btn-continue-remove').addEventListener('click', ev => {
+      ev.stopPropagation();
+      removeProgress(e.link);
+      renderContinueReading();
+    });
+    list.appendChild(item);
+  });
+}
+
+function restoreProgressScroll(article) {
+  const entry = getProgress(article.link);
+  if (!entry) return;
+  const body = document.getElementById('reader-body');
+  if (!body) return;
+  // Defer until content is laid out; use current scrollHeight, fall back to saved ratio
+  requestAnimationFrame(() => {
+    const curMax = body.scrollHeight - body.clientHeight;
+    const target = entry.scrollHeight > 0
+      ? entry.pct * curMax
+      : entry.scrollTop;
+    body.scrollTop = Math.max(0, target);
+  });
+}
+
+// =====================================================
+// AUDIO PLAYER (podcast)
+// =====================================================
+// Persistent sticky player with MediaSession API for lock-screen controls.
+// Survives reader dismissal — audio keeps playing in the background.
+const RATE_STEPS = [1, 1.25, 1.5, 2, 0.75];
+const AUDIO_STATE_KEY = 'dailybao_audio_state';
+
+let currentAudioArticle = null;
+
+function formatTime(s) {
+  if (!isFinite(s) || s < 0) s = 0;
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = Math.floor(s % 60).toString().padStart(2, '0');
+  return h > 0 ? `${h}:${m.toString().padStart(2,'0')}:${ss}` : `${m}:${ss}`;
+}
+
+function saveAudioState() {
+  if (!currentAudioArticle) return;
+  const el = document.getElementById('audio-el');
+  try {
+    localStorage.setItem(AUDIO_STATE_KEY, JSON.stringify({
+      articleLink: currentAudioArticle.link,
+      position: el.currentTime || 0,
+      rate: el.playbackRate || 1,
+      savedAt: Date.now(),
+    }));
+  } catch {}
+}
+
+function playPodcast(article) {
+  if (!article.audio?.url) return;
+  const player = document.getElementById('audio-player');
+  const el = document.getElementById('audio-el');
+  const thumb = document.getElementById('ap-thumb');
+
+  if (currentAudioArticle?.link !== article.link) {
+    currentAudioArticle = article;
+    el.src = article.audio.url;
+    document.getElementById('ap-title').textContent = article.title || '';
+    document.getElementById('ap-source').textContent = article.feedName || '';
+    thumb.src = article.thumbnail || '';
+    thumb.onerror = () => { thumb.src = ''; };
+
+    // MediaSession metadata (lock screen / notification / bluetooth controls)
+    if ('mediaSession' in navigator) {
+      const artwork = article.thumbnail
+        ? [{ src: article.thumbnail, sizes: '512x512', type: 'image/jpeg' }]
+        : [];
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: article.title || 'Podcast',
+        artist: article.feedName || 'The Daily Bao',
+        album: article.section || 'Podcast',
+        artwork,
+      });
+    }
+  }
+
+  player.classList.remove('hidden');
+  document.body.classList.add('audio-active');
+  el.play().catch(e => console.warn('Audio play failed:', e?.message));
+}
+
+function togglePodcast() {
+  const el = document.getElementById('audio-el');
+  if (!el.src) return;
+  if (el.paused) el.play().catch(() => {});
+  else el.pause();
+}
+
+function closePodcast() {
+  const el = document.getElementById('audio-el');
+  el.pause();
+  el.removeAttribute('src');
+  el.load();
+  currentAudioArticle = null;
+  document.getElementById('audio-player').classList.add('hidden');
+  document.body.classList.remove('audio-active');
+  try { localStorage.removeItem(AUDIO_STATE_KEY); } catch {}
+  if ('mediaSession' in navigator) navigator.mediaSession.metadata = null;
+}
+
+(function initAudioPlayer() {
+  const el = document.getElementById('audio-el');
+  const playBtn = document.getElementById('ap-play');
+  const back15 = document.getElementById('ap-back15');
+  const fwd30 = document.getElementById('ap-fwd30');
+  const rateBtn = document.getElementById('ap-rate');
+  const closeBtn = document.getElementById('ap-close');
+  const seek = document.getElementById('ap-seek');
+  const timeCur = document.getElementById('ap-time-cur');
+  const timeDur = document.getElementById('ap-time-dur');
+
+  playBtn.addEventListener('click', togglePodcast);
+  back15.addEventListener('click', () => { el.currentTime = Math.max(0, el.currentTime - 15); });
+  fwd30.addEventListener('click', () => { el.currentTime = Math.min(el.duration || 0, el.currentTime + 30); });
+  closeBtn.addEventListener('click', closePodcast);
+
+  rateBtn.addEventListener('click', () => {
+    const idx = RATE_STEPS.indexOf(el.playbackRate);
+    const next = RATE_STEPS[(idx + 1) % RATE_STEPS.length];
+    el.playbackRate = next;
+    rateBtn.textContent = `${next}×`;
+    saveAudioState();
+  });
+
+  el.addEventListener('play',  () => { playBtn.textContent = '❚❚'; });
+  el.addEventListener('pause', () => { playBtn.textContent = '▶'; });
+  el.addEventListener('ended', () => { playBtn.textContent = '▶'; });
+
+  el.addEventListener('loadedmetadata', () => {
+    seek.max = el.duration || 100;
+    timeDur.textContent = formatTime(el.duration);
+  });
+
+  let seeking = false;
+  el.addEventListener('timeupdate', () => {
+    if (seeking) return;
+    seek.value = el.currentTime;
+    timeCur.textContent = formatTime(el.currentTime);
+  });
+  seek.addEventListener('input', () => { seeking = true; timeCur.textContent = formatTime(+seek.value); });
+  seek.addEventListener('change', () => { el.currentTime = +seek.value; seeking = false; });
+
+  // Persist playback position every few seconds
+  let lastSave = 0;
+  el.addEventListener('timeupdate', () => {
+    const now = Date.now();
+    if (now - lastSave > 3000) { lastSave = now; saveAudioState(); }
+  });
+  window.addEventListener('beforeunload', saveAudioState);
+
+  // MediaSession action handlers (lock screen controls)
+  if ('mediaSession' in navigator) {
+    const ms = navigator.mediaSession;
+    try { ms.setActionHandler('play',  () => el.play().catch(() => {})); } catch {}
+    try { ms.setActionHandler('pause', () => el.pause()); } catch {}
+    try { ms.setActionHandler('seekbackward', (d) => { el.currentTime = Math.max(0, el.currentTime - (d.seekOffset || 15)); }); } catch {}
+    try { ms.setActionHandler('seekforward',  (d) => { el.currentTime = Math.min(el.duration || 0, el.currentTime + (d.seekOffset || 30)); }); } catch {}
+    try { ms.setActionHandler('seekto', (d) => { if (d.fastSeek && 'fastSeek' in el) el.fastSeek(d.seekTime); else el.currentTime = d.seekTime; }); } catch {}
+    try { ms.setActionHandler('stop', closePodcast); } catch {}
+  }
+})();
+
+// =====================================================
 // SETTINGS PANEL
 // =====================================================
 function renderFeedList() {
@@ -825,8 +1243,10 @@ function renderFeedList() {
   count.textContent = userFeeds.length;
   list.innerHTML = '';
 
-  // Group feeds by section, preserving insertion order
+  // Group feeds by section, preserving insertion order.
+  // Also include user-created empty categories so they show up even without feeds.
   const groups = new Map();
+  userCategories.forEach(sec => { if (sec) groups.set(sec, []); });
   userFeeds.forEach(feed => {
     const sec = feed.section || 'Other';
     if (!groups.has(sec)) groups.set(sec, []);
@@ -836,11 +1256,25 @@ function renderFeedList() {
   groups.forEach((feeds, secName) => {
     const details = document.createElement('details');
     details.className = 'feed-section-group';
+    if (activeSection === secName) details.classList.add('section-active');
     details.open = true;
 
     const summary = document.createElement('summary');
     const labelSpan = document.createElement('span');
+    labelSpan.className = 'feed-section-label';
     labelSpan.textContent = sectionLabel(secName);
+    labelSpan.title = 'Click to filter by this category';
+    labelSpan.addEventListener('click', e => {
+      e.preventDefault(); e.stopPropagation();
+      activeFeed = null;
+      activeSection = activeSection === secName ? 'all' : secName;
+      renderTabs();
+      renderFeedList();
+      renderFeed();
+      closePanel('settings-panel');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+
     const countSpan = document.createElement('span');
     countSpan.className = 'feed-section-count';
     countSpan.textContent = feeds.length;
@@ -861,6 +1295,7 @@ function renderFeedList() {
         if (newName && newName !== secName) {
           if (activeSection === secName) activeSection = newName;
           userFeeds = userFeeds.map(f => f.section === secName ? { ...f, section: newName } : f);
+          userCategories = userCategories.map(c => c === secName ? newName : c);
           await saveUserFeeds();
           renderFeedList();
           renderTabs();
@@ -876,15 +1311,51 @@ function renderFeedList() {
         if (ev.key === 'Escape') { ev.preventDefault(); input.replaceWith(labelSpan); }
       });
     });
+
+    // Delete-category button — only safe when empty
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'btn-rename-section';
+    deleteBtn.title = 'Remove category';
+    deleteBtn.textContent = '🗑';
+    deleteBtn.style.marginLeft = '0.1rem';
+    deleteBtn.addEventListener('click', async e => {
+      e.preventDefault(); e.stopPropagation();
+      if (feeds.length > 0) {
+        showToast('Move or remove the sources in this category first.');
+        return;
+      }
+      if (!confirm(`Remove empty category "${secName}"?`)) return;
+      userCategories = userCategories.filter(c => c !== secName);
+      if (activeSection === secName) activeSection = 'all';
+      await saveUserFeeds();
+      renderFeedList();
+      renderTabs();
+      updateSectionsDatalist();
+      renderFeed();
+    });
+
     summary.appendChild(labelSpan);
     summary.appendChild(renameBtn);
+    if (feeds.length === 0) summary.appendChild(deleteBtn);
     summary.appendChild(countSpan);
     details.appendChild(summary);
+
+    if (feeds.length === 0) {
+      const hint = document.createElement('div');
+      hint.className = 'continue-empty';
+      hint.style.padding = '0.4rem 0.9rem';
+      hint.textContent = 'No sources yet — use "+ Add" to add one here.';
+      details.appendChild(hint);
+    }
 
     feeds.forEach(feed => {
       const el = document.createElement('div');
       el.className = 'feed-item' + (activeFeed === feed.id ? ' feed-item-active' : '');
+      el.dataset.feedId = feed.id;
+      el.dataset.section = secName;
+      el.draggable = true;
       el.innerHTML = `
+        <span class="feed-drag-handle" title="Drag to reorder" aria-hidden="true">⋮⋮</span>
         <div class="feed-item-info">
           <div class="feed-item-name">${esc(feed.name)}</div>
           <div class="feed-item-section">
@@ -902,6 +1373,7 @@ function renderFeedList() {
       // Click the info area to filter by this feed
       el.querySelector('.feed-item-info').addEventListener('click', () => {
         activeFeed = activeFeed === feed.id ? null : feed.id;
+        activeSection = 'all';
         renderFeed();
         renderFeedList();
         closePanel('settings-panel');
@@ -915,6 +1387,37 @@ function renderFeedList() {
       }, { passive: true });
       el.addEventListener('touchend',  () => clearTimeout(lpTimer));
       el.addEventListener('touchmove', () => clearTimeout(lpTimer));
+
+      // Drag-and-drop to reorder within a category (and move across categories)
+      el.addEventListener('dragstart', ev => {
+        ev.dataTransfer.effectAllowed = 'move';
+        ev.dataTransfer.setData('text/plain', feed.id);
+        el.classList.add('dragging');
+      });
+      el.addEventListener('dragend', () => {
+        el.classList.remove('dragging');
+        document.querySelectorAll('.feed-item.drop-above, .feed-item.drop-below')
+          .forEach(x => x.classList.remove('drop-above', 'drop-below'));
+      });
+      el.addEventListener('dragover', ev => {
+        ev.preventDefault();
+        ev.dataTransfer.dropEffect = 'move';
+        const rect = el.getBoundingClientRect();
+        const above = (ev.clientY - rect.top) < rect.height / 2;
+        el.classList.toggle('drop-above', above);
+        el.classList.toggle('drop-below', !above);
+      });
+      el.addEventListener('dragleave', () => {
+        el.classList.remove('drop-above', 'drop-below');
+      });
+      el.addEventListener('drop', async ev => {
+        ev.preventDefault();
+        const srcId = ev.dataTransfer.getData('text/plain');
+        const above = el.classList.contains('drop-above');
+        el.classList.remove('drop-above', 'drop-below');
+        if (!srcId || srcId === feed.id) return;
+        await reorderFeeds(srcId, feed.id, secName, above);
+      });
 
       el.querySelector('.btn-edit').addEventListener('click', (e) => { e.stopPropagation(); openEditFeed(feed.id); });
       el.querySelector('.btn-remove').addEventListener('click', (e) => { e.stopPropagation(); removeFeed(feed.id); });
@@ -933,6 +1436,25 @@ function renderFeedList() {
     allDetails.forEach(d => d.open = !anyOpen);
     chevron.classList.toggle('collapsed', anyOpen);
   };
+}
+
+async function reorderFeeds(srcId, targetId, targetSection, above) {
+  const src = userFeeds.find(f => f.id === srcId);
+  if (!src) return;
+  // Pull src out, mutate its section to match the drop target, then insert
+  // above or below the target in userFeeds order.
+  const without = userFeeds.filter(f => f.id !== srcId);
+  const moved = { ...src, section: targetSection };
+  const idx = without.findIndex(f => f.id === targetId);
+  if (idx === -1) return;
+  const insertAt = above ? idx : idx + 1;
+  without.splice(insertAt, 0, moved);
+  userFeeds = without;
+  await saveUserFeeds();
+  renderFeedList();
+  renderTabs();
+  updateSectionsDatalist();
+  renderFeed();
 }
 
 async function removeFeed(feedId) {
@@ -1107,8 +1629,17 @@ async function resolveXhsShortLink(shortUrl) {
 async function detectFeedUrl(inputUrl) {
   const url = inputUrl.startsWith('http') ? inputUrl : `https://${inputUrl}`;
 
-  // Check if it's a YouTube channel URL
-  const ytMatch = url.match(/youtube\.com\/@([\w-]+)|youtube\.com\/channel\/([\w-]+)|youtube\.com\/c\/([\w-]+)/);
+  // Already a YouTube feed URL — pass through
+  if (/youtube\.com\/feeds\/videos\.xml\?channel_id=UC[\w-]+/i.test(url)) return url;
+
+  // Already has a raw channel ID — UCxxx
+  const rawChannelMatch = url.match(/(UC[\w-]{20,})/);
+  if (rawChannelMatch && /youtube\.com|youtu\.be/i.test(url)) {
+    return `https://www.youtube.com/feeds/videos.xml?channel_id=${rawChannelMatch[1]}`;
+  }
+
+  // YouTube channel/handle/custom URL — scrape for channel ID
+  const ytMatch = url.match(/youtube\.com\/(?:@[\w.-]+|channel\/[\w-]+|c\/[\w.-]+|user\/[\w.-]+)/i);
   if (ytMatch) {
     const channelId = await resolveYouTubeChannelId(url);
     return `https://www.youtube.com/feeds/videos.xml?channel_id=${channelId}`;
@@ -1203,14 +1734,27 @@ async function applyYtFilter(articles, feed) {
 }
 
 async function resolveYouTubeChannelId(channelUrl) {
-  // Try to scrape channel page for canonical channel ID
-  const html = await corsGet(channelUrl);
-  const match = html.match(/"channelId":"(UC[\w-]+)"/);
-  if (match) return match[1];
-  // Fallback: extract from URL if it's already a /channel/ URL
-  const idMatch = channelUrl.match(/channel\/(UC[\w-]+)/);
+  // Fast path: already a /channel/UC... URL
+  const idMatch = channelUrl.match(/channel\/(UC[\w-]{20,})/);
   if (idMatch) return idMatch[1];
-  throw new Error('Could not resolve YouTube channel ID');
+
+  // Scrape the channel page — try multiple patterns. YouTube embeds the
+  // channel ID under several keys depending on the page variant.
+  const html = await corsGet(channelUrl);
+  const patterns = [
+    /"channelId":"(UC[\w-]{20,})"/,
+    /"externalId":"(UC[\w-]{20,})"/,
+    /"externalChannelId":"(UC[\w-]{20,})"/,
+    /"browseId":"(UC[\w-]{20,})"/,
+    /<link\s+rel="canonical"\s+href="https?:\/\/www\.youtube\.com\/channel\/(UC[\w-]{20,})"/i,
+    /<meta\s+itemprop="channelId"\s+content="(UC[\w-]{20,})"/i,
+    /youtube\.com\/channel\/(UC[\w-]{20,})/,
+  ];
+  for (const p of patterns) {
+    const m = html.match(p);
+    if (m) return m[1];
+  }
+  throw new Error('Could not resolve YouTube channel ID — try pasting the /channel/UC... URL directly');
 }
 
 document.getElementById('save-feed-btn').addEventListener('click', async () => {
@@ -1304,13 +1848,16 @@ function openPanel(id) {
   document.getElementById(id).classList.remove('hidden');
   requestAnimationFrame(() => document.getElementById(id).classList.add('open'));
   document.getElementById('panel-backdrop').classList.remove('hidden');
+  document.body.classList.add('body-locked');
 }
 function closePanel(id) {
   document.getElementById(id).classList.remove('open');
   hidePanelBackdrop();
+  updateBodyLock();
 }
 function openModal(id) {
   document.getElementById(id).classList.remove('hidden');
+  document.body.classList.add('body-locked');
   // Reset form
   document.getElementById('feed-url-input').value     = '';
   document.getElementById('feed-name-input').value    = '';
@@ -1323,11 +1870,19 @@ function openModal(id) {
 }
 function closeModal(id) {
   document.getElementById(id).classList.add('hidden');
+  updateBodyLock();
 }
 
 function hidePanelBackdrop() {
   const openPanels = document.querySelectorAll('.side-panel.open, .reader-panel.open');
   if (openPanels.length === 0) document.getElementById('panel-backdrop').classList.add('hidden');
+}
+
+function updateBodyLock() {
+  const anyOpen =
+    document.querySelectorAll('.side-panel.open, .reader-panel.open').length > 0 ||
+    document.querySelectorAll('.modal-overlay:not(.hidden)').length > 0;
+  document.body.classList.toggle('body-locked', anyOpen);
 }
 
 // Close buttons (data-close attribute)
@@ -1343,15 +1898,22 @@ document.querySelectorAll('[data-close]').forEach(btn => {
 });
 
 document.getElementById('panel-backdrop').addEventListener('click', () => {
+  const readerOpenNow = document.querySelector('.reader-panel.open');
   document.querySelectorAll('.side-panel.open, .reader-panel.open').forEach(p => p.classList.remove('open'));
+  if (readerOpenNow) endReadSession();
   hidePanelBackdrop();
+  updateBodyLock();
 });
 
 document.getElementById('user-btn').addEventListener('click', () => {
   renderFeedList();
+  renderContinueReading();
   openPanel('settings-panel');
 });
-document.getElementById('reader-back-btn').addEventListener('click', () => closePanel('reader-panel'));
+document.getElementById('reader-back-btn').addEventListener('click', () => {
+  endReadSession();
+  closePanel('reader-panel');
+});
 
 // Swipe-to-dismiss for slide-in panels (left-edge swipe)
 function addSwipeToDismiss(panel) {
@@ -1417,7 +1979,7 @@ addSwipeToDismiss(document.getElementById('settings-panel'));
     if (!armed) return;
     armed = false;
     const dx = e.changedTouches[0].clientX - startX;
-    if (dx < -60) { renderFeedList(); openPanel('settings-panel'); }
+    if (dx < -60) { renderFeedList(); renderContinueReading(); openPanel('settings-panel'); }
   }, { passive: true });
 })();
 
@@ -1482,16 +2044,34 @@ function updateSectionsDatalist() {
   if (!dl) return;
   dl.innerHTML = '';
   const seen = new Set();
-  userFeeds.forEach(f => {
-    const sec = f.section || 'Other';
-    if (!seen.has(sec)) {
-      seen.add(sec);
-      const opt = document.createElement('option');
-      opt.value = sec;
-      dl.appendChild(opt);
-    }
-  });
+  const addOpt = sec => {
+    if (!sec || seen.has(sec)) return;
+    seen.add(sec);
+    const opt = document.createElement('option');
+    opt.value = sec;
+    dl.appendChild(opt);
+  };
+  userCategories.forEach(addOpt);
+  userFeeds.forEach(f => addOpt(f.section || 'Other'));
 }
+
+document.getElementById('add-category-btn')?.addEventListener('click', async () => {
+  const name = prompt('New category name (e.g. Sports, Gaming):');
+  if (!name) return;
+  const trimmed = name.trim();
+  if (!trimmed) return;
+  const already = userCategories.includes(trimmed) ||
+                  userFeeds.some(f => f.section === trimmed);
+  if (already) {
+    showToast(`"${trimmed}" already exists.`);
+    return;
+  }
+  userCategories.push(trimmed);
+  await saveUserFeeds();
+  renderFeedList();
+  renderTabs();
+  updateSectionsDatalist();
+});
 
 document.querySelectorAll('.lang-btn').forEach(btn => {
   btn.addEventListener('click', () => {
