@@ -1366,16 +1366,24 @@ button { cursor: pointer; font-family: var(--font-main); border: none; backgroun
 }
 .reader-prose li { margin-bottom: 0.25rem; text-indent: 0; }
 
-/* Images & figures */
+/* Images & figures — always horizontally centered in the column */
 .reader-prose img {
   max-width: 100%;
   height: auto;
   width: auto;
+  margin-left: auto;
+  margin-right: auto;
   border-radius: var(--radius-sm);
   margin: 1.5rem 0 0.5rem;
   display: block;
 }
-.reader-prose figure { margin: 1.5rem 0; text-indent: 0; }
+.reader-prose figure {
+  margin: 1.5rem auto;
+  text-indent: 0;
+  text-align: center;
+}
+.reader-prose figure img { display: inline-block; }
+.reader-prose picture { display: block; text-align: center; }
 .reader-prose figcaption {
   font-family: var(--font-serif-body);
   font-style: italic;
@@ -1461,7 +1469,9 @@ button { cursor: pointer; font-family: var(--font-main); border: none; backgroun
   left: 0;
   right: 0;
   bottom: 0;
-  z-index: 500;
+  /* Above reader-panel (350), settings (200–300), modals (~400), backdrop — keep on top
+     even when a full-screen overlay is up. */
+  z-index: 1200;
   background: var(--bg-surface);
   border-top: 1px solid var(--border-strong);
   box-shadow: 0 -6px 24px var(--shadow);
@@ -1473,6 +1483,15 @@ button { cursor: pointer; font-family: var(--font-main); border: none; backgroun
   transition: transform 0.22s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .audio-player.hidden { display: none; }
+
+/* Quick flash when the track changes — signals the bar is still alive
+   and a new episode has started. */
+@keyframes ap-track-flash {
+  0%   { box-shadow: 0 -6px 24px var(--shadow), 0 0 0 0 color-mix(in srgb, var(--accent) 50%, transparent); }
+  50%  { box-shadow: 0 -6px 24px var(--shadow), 0 0 0 6px color-mix(in srgb, var(--accent) 25%, transparent); }
+  100% { box-shadow: 0 -6px 24px var(--shadow), 0 0 0 0 transparent; }
+}
+.audio-player.track-change { animation: ap-track-flash 0.7s ease-out; }
 
 .ap-main {
   display: flex;

@@ -338,29 +338,31 @@
   <!-- OVERLAY backdrop -->
   <div id="panel-backdrop" class="panel-backdrop hidden"></div>
 
-  <!-- ===================== AUDIO PLAYER (sticky) ===================== -->
-  <div id="audio-player" class="audio-player hidden" aria-label="Podcast player">
-    <audio id="audio-el" preload="metadata"></audio>
-    <div class="ap-main">
-      <img id="ap-thumb" class="ap-thumb" alt="" />
-      <div class="ap-text">
-        <div id="ap-title" class="ap-title"></div>
-        <div id="ap-source" class="ap-source"></div>
-      </div>
-      <button id="ap-back15" class="ap-btn ap-skip" title="Back 15s" aria-label="Back 15 seconds">⟲15</button>
-      <button id="ap-play" class="ap-btn ap-play" title="Play / pause" aria-label="Play / pause">▶</button>
-      <button id="ap-fwd30" class="ap-btn ap-skip" title="Forward 30s" aria-label="Forward 30 seconds">30⟳</button>
-      <button id="ap-rate" class="ap-btn ap-rate" title="Playback speed" aria-label="Playback speed">1×</button>
-      <button id="ap-close" class="ap-btn ap-close" title="Close" aria-label="Close player">✕</button>
-    </div>
-    <div class="ap-scrubber">
-      <span id="ap-time-cur" class="ap-time">0:00</span>
-      <input id="ap-seek" class="ap-seek" type="range" min="0" max="100" step="0.1" value="0" aria-label="Seek" />
-      <span id="ap-time-dur" class="ap-time">0:00</span>
-    </div>
-  </div>
-
 </div><!-- end #app-page -->
+
+<!-- ===================== AUDIO PLAYER (sticky, outside app-page) ===================== -->
+<!-- Positioned at <body> level so it stays above reader/settings panels on every
+     screen size, including mobile where body-locked clips #app-page. -->
+<div id="audio-player" class="audio-player hidden" aria-label="Podcast player">
+  <audio id="audio-el" preload="metadata"></audio>
+  <div class="ap-main">
+    <img id="ap-thumb" class="ap-thumb" alt="" />
+    <div class="ap-text">
+      <div id="ap-title" class="ap-title"></div>
+      <div id="ap-source" class="ap-source"></div>
+    </div>
+    <button id="ap-back15" class="ap-btn ap-skip" title="Back 15s" aria-label="Back 15 seconds">⟲15</button>
+    <button id="ap-play" class="ap-btn ap-play" title="Play / pause" aria-label="Play / pause">▶</button>
+    <button id="ap-fwd30" class="ap-btn ap-skip" title="Forward 30s" aria-label="Forward 30 seconds">30⟳</button>
+    <button id="ap-rate" class="ap-btn ap-rate" title="Playback speed" aria-label="Playback speed">1×</button>
+    <button id="ap-close" class="ap-btn ap-close" title="Close" aria-label="Close player">✕</button>
+  </div>
+  <div class="ap-scrubber">
+    <span id="ap-time-cur" class="ap-time">0:00</span>
+    <input id="ap-seek" class="ap-seek" type="range" min="0" max="100" step="0.1" value="0" aria-label="Seek" />
+    <span id="ap-time-dur" class="ap-time">0:00</span>
+  </div>
+</div>
 
 <!-- Scripts -->
 <script src="https://cdn.jsdelivr.net/npm/rss-parser@3/dist/rss-parser.min.js"></script>
