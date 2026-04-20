@@ -1134,6 +1134,12 @@ function playPodcast(article) {
     thumb.src = article.thumbnail || '';
     thumb.onerror = () => { thumb.src = ''; };
 
+    // Visual cue: flash the player bar so the user sees the track swap
+    player.classList.remove('track-change');
+    // force reflow so the animation restarts on consecutive track changes
+    void player.offsetWidth;
+    player.classList.add('track-change');
+
     // MediaSession metadata (lock screen / notification / bluetooth controls)
     if ('mediaSession' in navigator) {
       const artwork = article.thumbnail
@@ -1947,7 +1953,9 @@ function addSwipeToDismiss(panel) {
         panel.style.transition = '';
         panel.style.transform = '';
         panel.classList.remove('open');
+        if (panel.id === 'reader-panel') endReadSession();
         hidePanelBackdrop();
+        updateBodyLock();
       }, { once: true });
     } else {
       panel.style.transition = '';
