@@ -1479,7 +1479,13 @@ button { cursor: pointer; font-family: var(--font-main); border: none; backgroun
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
-  transform: translateY(0);
+  /* GPU-layer promotion — fixes iOS Safari repainting fixed elements during
+     rubber-band scroll, which made the bar flicker off on some devices. */
+  transform: translate3d(0, 0, 0);
+  -webkit-transform: translate3d(0, 0, 0);
+  will-change: transform;
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
   transition: transform 0.22s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .audio-player.hidden { display: none; }
