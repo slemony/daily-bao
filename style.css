@@ -1151,6 +1151,31 @@ button { cursor: pointer; font-family: var(--font-main); border: none; backgroun
 }
 .helper-box code { background: var(--bg-hover); padding: 0.1rem 0.35rem; border-radius: 4px; font-size: 0.75rem; color: var(--text); }
 
+.yt-filter-group {
+  margin-top: 0.6rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.85rem;
+}
+.yt-filter-group legend {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  padding: 0 0.3rem;
+}
+.yt-filter-group label {
+  font-size: 0.8rem;
+  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  cursor: pointer;
+}
+.yt-filter-group input[type="radio"] { margin: 0; cursor: pointer; }
+
 /* =====================================================
    READER PANEL
    ===================================================== */

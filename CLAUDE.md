@@ -12,6 +12,7 @@ A personal news reader web app that replaces social media. Free, cloud-hosted on
 - **RSS parsing**: `rss-parser@3` loaded from jsDelivr CDN (global `RSSParser`); handles `content:encoded`, Atom `<content>`, CDATA, Media RSS
 - **Article reader**: Mozilla Readability.js loaded from jsDelivr CDN (preloaded silently after first feed fetch)
 - **Article cache**: `localStorage` key `dailybao_feed_cache` — same-day cache, stale-while-revalidate on new day
+- **YouTube shorts cache**: `localStorage` key `dailybao_yt_short_cache` — maps `videoId` → `isShort` boolean, populated via YouTube oEmbed thumbnail aspect ratio, capped at 2000 entries (FIFO trim)
 
 ## File structure
 ```
@@ -47,9 +48,10 @@ Each `.article-card` shows:
 
 ## Feed source filter
 - `activeFeed` global (null = show all) — set by clicking a feed's name in the settings panel
-- Clicking closes the panel and filters `renderFeed()` to that feed's articles only
-- When active, `#feed-filter-chip` appears inline in the header next to "The Daily Bao" — shows `· [name] ✕`; clicking ✕ clears the filter
+- Clicking closes the panel, filters `renderFeed()` to that feed's articles, and smooth-scrolls the page to the top
+- When active, `#feed-filter-chip` appears inline in the header next to "The Daily Bao" — shows `· [name] ✕`; clicking ✕ clears the filter and scrolls to top
 - Active feed item is highlighted with `.feed-item-active` class
+- Scroll-to-top is only wired to filter clicks, NOT inside `renderFeed()` — background refresh must not disrupt scroll position
 
 ## Section / tag system
 - Each feed has a `section` field — a free-form string (e.g. "World News", "Tech & AI", anything user types)
@@ -73,9 +75,15 @@ Each `.article-card` shows:
 - Swipe left-edge of open panel → dismiss: existing `addSwipeToDismiss()` on `#settings-panel`
 - Modals (`#add-feed-modal`, `#edit-feed-modal`) are `max-height: 90vh` with scrollable `.modal-body` — header and footer stay pinned
 
+## Panel & reader dismissal
+- `#panel-backdrop` click closes both `.side-panel.open` AND `.reader-panel.open` — on desktop the reader is a 60vw right slide-over, so clicking the dimmed left area dismisses it
+- `hidePanelBackdrop()` checks for any remaining open panel/reader before hiding the backdrop
+
 ## Reader image handling
 - `.reader-prose img` has `height: auto; width: auto` — prevents stretching from explicit HTML attributes
 - `cleanReaderContent()` strips inline `width`/`height` attributes and styles from all `<img>` tags after the lazy-load replacement pass
+- Also dedupes images by normalized src (strips query string, Vox-style `-NNNN` size suffixes, `/WxH/` resize segments) — fixes Verge articles that render the hero image twice; removes the parent `<figure>` if it becomes empty
+- Strips empty `<li>` elements (no text, no media) and any `<ul>`/`<ol>` that end up empty — fixes stray bullet dots in Verge articles
 
 ## Firebase config
 The `FIREBASE_CONFIG` object at the top of `app.js` is a placeholder. User fills it in from Firebase Console → Project Settings → Your Apps. Do not commit real API keys.
@@ -84,6 +92,9 @@ The `FIREBASE_CONFIG` object at the top of `app.js` is a placeholder. User fills
 - YouTube: standard Atom feed `https://www.youtube.com/feeds/videos.xml?channel_id=CHANNEL_ID`
 - XHS: via RSSHub public instance `https://rsshub.app/xiaohongshu/user/{userid}`
 - XHS URL auto-detection handles: `xiaohongshu.com/user/profile/{id}`, `rednote.com/user/profile/{id}`, `xhslink.com/m/{short}` (phone share — resolved via allorigins redirect)
+- **YouTube shorts filter**: each YouTube feed has a `ytFilter` field on its feed object — `'all' | 'long' | 'shorts'` (default `'all'`). Set via radio group inside `#youtube-helper` (add modal) and `#edit-yt-filter-group` (edit modal); only visible when the URL includes `youtube.com/feeds`
+- Shorts are detected by `getYtIsShort(videoId)` — calls YouTube oEmbed (`https://www.youtube.com/oembed?url=…&format=json`) and checks `thumbnail_height > thumbnail_width`. Results cached in localStorage (see Tech stack). `null` return means unknown → kept when filtering long-form (so detection misses don't vanish) but dropped when filtering shorts-only
+- `applyYtFilter(articles, feed)` runs at the end of `parseRSS()` and `parseRss2json()` — no-op unless the feed is a YouTube feed with `ytFilter !== 'all'`
 
 ## Feed debug log
 - `feedLogs` array in `app.js` records per-feed OK/error with timestamp on every fetch

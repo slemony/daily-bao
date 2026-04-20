@@ -288,7 +288,7 @@ async function corsGet(url) {
 
 async function parseRSS(xmlText, feed) {
   const result = await rssParser.parseString(xmlText);
-  return result.items.slice(0, 15).map(item => {
+  const articles = result.items.slice(0, 15).map(item => {
     const rawSummary = item.contentEncoded || item.content || item.contentSnippet || item.summary || '';
     const summary = rawSummary.replace(/<[^>]*>/g, '').trim().slice(0, 200);
 
@@ -326,13 +326,14 @@ async function parseRSS(xmlText, feed) {
       isCreator: feed.url.includes('youtube.com/feeds') || feed.url.includes('rsshub.app/xiaohongshu') || feed.url.includes('rsshub.app/xhslink') || feed.section === 'Creators',
     };
   }).filter(Boolean);
+  return applyYtFilter(articles, feed);
 }
 
-function parseRss2json(json, feed) {
+async function parseRss2json(json, feed) {
   let feedDomain = '';
   try { feedDomain = new URL(feed.url).hostname.replace(/^www\./, ''); } catch {}
 
-  return json.items.slice(0, 15).map(item => {
+  const articles = json.items.slice(0, 15).map(item => {
     const rawSummary = item.content || item.description || '';
     const summary = rawSummary.replace(/<[^>]*>/g, '').trim().slice(0, 200);
     const link = item.link || item.guid || '';
@@ -346,6 +347,10 @@ function parseRss2json(json, feed) {
       if (m && !m[1].startsWith('data:')) thumbnail = m[1];
     }
 
+    let videoId = '';
+    const vm = link.match(/[?&]v=([\w-]{6,})/);
+    if (vm) videoId = vm[1];
+
     return {
       id:        `${feed.id}-${link}`,
       feedId:    feed.id,
@@ -358,11 +363,12 @@ function parseRss2json(json, feed) {
       link,
       author:    item.author || '',
       date:      item.pubDate ? new Date(item.pubDate) : null,
-      videoId:   '',
+      videoId,
       thumbnail,
       isCreator: feed.url.includes('youtube.com/feeds') || feed.url.includes('rsshub.app/xiaohongshu') || feed.url.includes('rsshub.app/xhslink') || feed.section === 'Creators',
     };
   }).filter(Boolean);
+  return applyYtFilter(articles, feed);
 }
 
 async function fetchFeed(feed) {
@@ -504,6 +510,7 @@ function renderFeed() {
         activeFeed = null;
         renderFeedList();
         renderFeed();
+        window.scrollTo({ top: 0, behavior: 'smooth' });
       });
     } else {
       chip.classList.add('hidden');
@@ -645,6 +652,41 @@ function cleanReaderContent(html, bylineText) {
     img.removeAttribute('height');
     img.style.removeProperty('width');
     img.style.removeProperty('height');
+  });
+
+  // Collapse duplicate images. Normalize src by stripping query string,
+  // Vox-style "-NNNN" size suffix (e.g. image-1200.jpg → image.jpg), and
+  // common /NNNNxNNNN/ resize segments. Keep first occurrence.
+  const normalizeImgSrc = (src) => {
+    try {
+      const u = new URL(src, location.href);
+      let p = u.pathname.replace(/-\d{2,4}(?=\.[a-z]{3,4}$)/i, '')
+                        .replace(/\/\d{2,4}x\d{2,4}\//g, '/');
+      return u.hostname + p;
+    } catch { return src; }
+  };
+  const seenImgs = new Set();
+  tpl.content.querySelectorAll('img').forEach(img => {
+    const src = img.getAttribute('src') || '';
+    if (!src) return;
+    const key = normalizeImgSrc(src);
+    if (seenImgs.has(key)) {
+      const fig = img.closest('figure');
+      if (fig && fig.querySelectorAll('img').length === 1) fig.remove();
+      else img.remove();
+    } else {
+      seenImgs.add(key);
+    }
+  });
+
+  // Drop empty <li> (Verge sprinkles these in) and collapse empty lists.
+  tpl.content.querySelectorAll('li').forEach(li => {
+    const hasText  = (li.textContent || '').trim().length > 0;
+    const hasMedia = li.querySelector('img, picture, video, iframe, svg') !== null;
+    if (!hasText && !hasMedia) li.remove();
+  });
+  tpl.content.querySelectorAll('ul, ol').forEach(list => {
+    if (list.children.length === 0) list.remove();
   });
 
   // Pass A: strip duplicate byline / preamble from the first 3 elements.
@@ -863,6 +905,7 @@ function renderFeedList() {
         renderFeed();
         renderFeedList();
         closePanel('settings-panel');
+        window.scrollTo({ top: 0, behavior: 'smooth' });
       });
 
       // Long-press on mobile to reveal edit/delete
@@ -920,6 +963,17 @@ async function openEditFeed(feedId) {
   document.getElementById('edit-feed-section').value = feed.section;
   document.getElementById('edit-feed-lang').value    = feed.lang;
 
+  const ytGroup = document.getElementById('edit-yt-filter-group');
+  if (feed.url.includes('youtube.com/feeds')) {
+    ytGroup.classList.remove('hidden');
+    const current = feed.ytFilter || 'all';
+    document.querySelectorAll('input[name="edit-yt-filter"]').forEach(r => {
+      r.checked = (r.value === current);
+    });
+  } else {
+    ytGroup.classList.add('hidden');
+  }
+
   const results = document.getElementById('edit-test-results');
   const status  = document.getElementById('edit-test-status');
   results.innerHTML    = '<div class="test-loading">Fetching feed...</div>';
@@ -953,12 +1007,17 @@ document.getElementById('save-edit-btn').addEventListener('click', async () => {
   if (idx === -1) return;
 
   const newName = document.getElementById('edit-feed-name').value.trim();
-  userFeeds[idx] = {
+  const updated = {
     ...userFeeds[idx],
     name:    newName || userFeeds[idx].name,
     section: document.getElementById('edit-feed-section').value,
     lang:    document.getElementById('edit-feed-lang').value,
   };
+  if (updated.url.includes('youtube.com/feeds')) {
+    const sel = document.querySelector('input[name="edit-yt-filter"]:checked');
+    updated.ytFilter = sel ? sel.value : (updated.ytFilter || 'all');
+  }
+  userFeeds[idx] = updated;
 
   await saveUserFeeds();
   renderFeedList();
@@ -994,6 +1053,10 @@ document.getElementById('detect-feed-btn').addEventListener('click', async () =>
     // Try URL directly as RSS first
     const feedUrl = await detectFeedUrl(url);
     document.getElementById('feed-url-input').value = feedUrl;
+
+    if (feedUrl.includes('youtube.com/feeds')) {
+      document.getElementById('youtube-helper').classList.remove('hidden');
+    }
 
     // Auto-fill name from feed title
     const xml = await corsGet(feedUrl);
@@ -1074,6 +1137,60 @@ async function detectFeedUrl(inputUrl) {
   throw new Error('No RSS feed detected');
 }
 
+const YT_SHORT_CACHE_KEY = 'dailybao_yt_short_cache';
+const YT_SHORT_CACHE_MAX = 2000;
+let ytShortCache = null;
+function loadYtShortCache() {
+  if (ytShortCache) return ytShortCache;
+  try { ytShortCache = JSON.parse(localStorage.getItem(YT_SHORT_CACHE_KEY) || '{}'); }
+  catch { ytShortCache = {}; }
+  return ytShortCache;
+}
+function saveYtShortCache() {
+  const keys = Object.keys(ytShortCache);
+  if (keys.length > YT_SHORT_CACHE_MAX) {
+    const trimmed = {};
+    keys.slice(-YT_SHORT_CACHE_MAX).forEach(k => { trimmed[k] = ytShortCache[k]; });
+    ytShortCache = trimmed;
+  }
+  try { localStorage.setItem(YT_SHORT_CACHE_KEY, JSON.stringify(ytShortCache)); } catch {}
+}
+async function getYtIsShort(videoId) {
+  if (!videoId) return null;
+  const cache = loadYtShortCache();
+  if (videoId in cache) return cache[videoId];
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 4000);
+    const res = await fetch(
+      `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`,
+      { signal: ctrl.signal }
+    );
+    clearTimeout(timer);
+    if (!res.ok) return null;
+    const j = await res.json();
+    const w = j.thumbnail_width || 0;
+    const h = j.thumbnail_height || 0;
+    if (!w || !h) return null;
+    const isShort = h > w;
+    cache[videoId] = isShort;
+    saveYtShortCache();
+    return isShort;
+  } catch { return null; }
+}
+
+async function applyYtFilter(articles, feed) {
+  if (!feed.url.includes('youtube.com/feeds')) return articles;
+  const filter = feed.ytFilter || 'all';
+  if (filter === 'all') return articles;
+  await Promise.all(articles.map(async a => {
+    if (a.videoId) a.ytIsShort = await getYtIsShort(a.videoId);
+  }));
+  if (filter === 'long')   return articles.filter(a => a.ytIsShort !== true);
+  if (filter === 'shorts') return articles.filter(a => a.ytIsShort === true);
+  return articles;
+}
+
 async function resolveYouTubeChannelId(channelUrl) {
   // Try to scrape channel page for canonical channel ID
   const html = await corsGet(channelUrl);
@@ -1103,6 +1220,11 @@ document.getElementById('save-feed-btn').addEventListener('click', async () => {
     lang,
     section,
   };
+
+  if (url.includes('youtube.com/feeds')) {
+    const sel = document.querySelector('input[name="feed-yt-filter"]:checked');
+    newFeed.ytFilter = sel ? sel.value : 'all';
+  }
 
   const btn = document.getElementById('save-feed-btn');
   const origLabel = btn.textContent;
@@ -1185,6 +1307,8 @@ function openModal(id) {
   document.querySelectorAll('.quick-pill').forEach(b => b.classList.remove('active'));
   document.getElementById('youtube-helper').classList.add('hidden');
   document.getElementById('xhs-helper').classList.add('hidden');
+  const ytAll = document.querySelector('input[name="feed-yt-filter"][value="all"]');
+  if (ytAll) ytAll.checked = true;
 }
 function closeModal(id) {
   document.getElementById(id).classList.add('hidden');
@@ -1208,7 +1332,7 @@ document.querySelectorAll('[data-close]').forEach(btn => {
 });
 
 document.getElementById('panel-backdrop').addEventListener('click', () => {
-  document.querySelectorAll('.side-panel.open').forEach(p => p.classList.remove('open'));
+  document.querySelectorAll('.side-panel.open, .reader-panel.open').forEach(p => p.classList.remove('open'));
   hidePanelBackdrop();
 });
 

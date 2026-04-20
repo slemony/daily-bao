@@ -212,6 +212,12 @@
 
         <div id="youtube-helper" class="helper-box hidden">
           <p>Paste the YouTube <strong>channel URL</strong> (e.g. <code>youtube.com/@channelname</code>) and we'll extract the channel ID automatically.</p>
+          <fieldset class="yt-filter-group">
+            <legend>Show videos:</legend>
+            <label><input type="radio" name="feed-yt-filter" value="long"> Long-form only</label>
+            <label><input type="radio" name="feed-yt-filter" value="shorts"> Shorts only</label>
+            <label><input type="radio" name="feed-yt-filter" value="all" checked> Both</label>
+          </fieldset>
         </div>
         <div id="xhs-helper" class="helper-box hidden">
           <p>Paste any of these and click <strong>Detect RSS</strong>:</p>
@@ -272,6 +278,14 @@
               <option value="Other">Other</option>
             </select>
           </div>
+        </div>
+        <div id="edit-yt-filter-group" class="form-group hidden">
+          <fieldset class="yt-filter-group">
+            <legend>Show videos:</legend>
+            <label><input type="radio" name="edit-yt-filter" value="long"> Long-form only</label>
+            <label><input type="radio" name="edit-yt-filter" value="shorts"> Shorts only</label>
+            <label><input type="radio" name="edit-yt-filter" value="all"> Both</label>
+          </fieldset>
         </div>
       </div>
       <div class="modal-footer">
