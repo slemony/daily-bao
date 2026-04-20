@@ -1124,6 +1124,7 @@ button { cursor: pointer; font-family: var(--font-main); border: none; backgroun
 .detect-status { font-size: 0.75rem; color: var(--text-muted); min-height: 1em; }
 .detect-status.success { color: #4caf50; }
 .detect-status.error   { color: #ff5252; }
+.detect-status.warn    { color: #e0a400; }
 
 .quick-add-section { display: flex; flex-direction: column; gap: 0.5rem; }
 .quick-add-label { font-size: 0.75rem; color: var(--text-dim); font-weight: 600; }
@@ -1457,6 +1458,10 @@ button { cursor: pointer; font-family: var(--font-main); border: none; backgroun
   #feed-container { padding: 0.5rem 0.75rem 2rem; }
   .modal-card { border-radius: 12px; }
   .form-row { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 768px) {
+  input, select, textarea { font-size: 16px; }
 }
 
 @media (min-width: 1200px) {
