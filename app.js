@@ -350,6 +350,7 @@ async function parseRSS(xmlText, feed) {
       videoId,
       thumbnail,
       audio,
+      rssHtml:   item.contentEncoded || item.content || '',
       isCreator: feed.url.includes('youtube.com/feeds') || feed.url.includes('rsshub.app/xiaohongshu') || feed.url.includes('rsshub.app/xhslink') || feed.section === 'Creators',
     };
   }).filter(Boolean);
@@ -399,6 +400,7 @@ async function parseRss2json(json, feed) {
       videoId,
       thumbnail,
       audio,
+      rssHtml:   item.content || item.description || '',
       isCreator: feed.url.includes('youtube.com/feeds') || feed.url.includes('rsshub.app/xiaohongshu') || feed.url.includes('rsshub.app/xhslink') || feed.section === 'Creators',
     };
   }).filter(Boolean);
@@ -893,6 +895,17 @@ async function openReader(article) {
     if (/security checkpoint|just a moment|attention required|ddos|vercel security/i.test(pageTitle))
       throw new Error(`Security checkpoint: "${pageTitle}"`);
 
+    // Pre-process: mark known article containers so Readability scores them higher.
+    // Helps sites with obfuscated class names (BBC, MarketWatch, etc.).
+    [
+      '[data-component="text-block"]',
+      '[data-testid="article-body"]',
+      '[itemprop="articleBody"]',
+      '[data-module="ArticleBody"]',
+    ].forEach(sel => {
+      htmlDoc.querySelectorAll(sel).forEach(el => el.classList.add('e-content'));
+    });
+
     // Use Readability
     const { Readability } = await import('https://cdn.jsdelivr.net/npm/@mozilla/readability@0.5.0/+esm');
     const reader = new Readability(htmlDoc);
@@ -900,21 +913,43 @@ async function openReader(article) {
 
     if (!parsed || !parsed.content) throw new Error('Readability returned nothing');
 
-    const wordCount = (parsed.textContent || '').split(/\s+/).filter(Boolean).length;
-    const readMins  = Math.max(1, Math.round(wordCount / 220));
+    let contentHtml = parsed.content;
+    let byline = parsed.byline || '';
+    let isRssFallback = false;
 
+    const wordCount = (parsed.textContent || '').split(/\s+/).filter(Boolean).length;
+
+    // If Readability got too little, try falling back to RSS feed content
+    if (wordCount < 50 && article.rssHtml) {
+      const rssWords = article.rssHtml.replace(/<[^>]*>/g, '').split(/\s+/).filter(Boolean).length;
+      if (rssWords > wordCount) {
+        contentHtml = article.rssHtml;
+        byline = '';
+        isRssFallback = true;
+      }
+    }
+
+    const finalWords = contentHtml.replace(/<[^>]*>/g, '').split(/\s+/).filter(Boolean).length;
+    if (finalWords < 15) throw new Error('Insufficient content — article may require a subscription');
+
+    const readMins = Math.max(1, Math.round(finalWords / 220));
     document.getElementById('reader-time').textContent = `· ~${readMins} min read`;
 
-    const sample = (parsed.textContent || '').slice(0, 200);
+    const sample = contentHtml.replace(/<[^>]*>/g, '').slice(0, 200);
     const isCJK = /[\u3400-\u9fff\uf900-\ufaff\u3040-\u30ff\uac00-\ud7af]/.test(sample);
     const proseClass = isCJK ? 'reader-prose is-cjk' : 'reader-prose';
-    const cleanedContent = cleanReaderContent(parsed.content, parsed.byline || '');
+    const cleanedContent = cleanReaderContent(contentHtml, byline);
+
+    const rssBanner = isRssFallback
+      ? `<p class="reader-rss-notice">Showing feed excerpt — <a href="${esc(article.link)}" target="_blank" rel="noopener">open original for full article ↗</a></p>`
+      : '';
 
     readerContent.innerHTML = `
       <h1>${esc(parsed.title || article.title)}</h1>
-      ${parsed.byline ? `<p class="reader-byline">${esc(parsed.byline)}</p>` : ''}
+      ${byline ? `<p class="reader-byline">${esc(byline)}</p>` : ''}
       ${article.audio?.url ? `<button class="reader-play-inline" type="button">🎧 Play podcast</button>` : ''}
       <hr class="reader-rule">
+      ${rssBanner}
       <div class="${proseClass}">${cleanedContent}</div>
     `;
     if (article.audio?.url) {
@@ -933,6 +968,10 @@ async function openReader(article) {
     readerLoading.classList.add('hidden');
     readerError.classList.remove('hidden');
     document.getElementById('reader-fallback-link').href = article.link;
+    const isPaywall = /insufficient content|subscription/i.test(e.message);
+    document.getElementById('reader-error-msg').textContent = isPaywall
+      ? 'This article may be behind a paywall or require JavaScript to load.'
+      : "Couldn't fetch this article.";
   }
 }
 
