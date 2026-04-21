@@ -6,14 +6,14 @@ A personal news reader web app that replaces social media. Free, cloud-hosted on
 ## Tech stack
 - **Frontend**: Vanilla HTML + CSS + JS (no build tools, no framework)
 - **Auth**: Firebase Auth — Google Sign-in only
-- **Database**: Firestore — stores per-user feed config (`/users/{uid}` → `{ feeds: [...], categories: [...] }`). `categories` is the list of user-created section names, including empty ones that have no feeds yet
+- **Database**: Firestore — stores per-user data at `/users/{uid}` → `{ feeds: [...], categories: [...], readProgress: {...} }`. `categories` is the list of user-created section names, including empty ones that have no feeds yet. `readProgress` is the Continue Reading map (capped at 30 entries) synced for cross-device support
 - **Hosting**: Firebase Hosting (`firebase deploy`)
 - **RSS fetching**: Client-side — direct fetch + 3 CORS proxies (allorigins, codetabs, cors.lol) raced with `Promise.any`, 8s timeout; rss2json.com as final fallback if all fail
 - **RSS parsing**: `rss-parser@3` loaded from jsDelivr CDN (global `RSSParser`); handles `content:encoded`, Atom `<content>`, CDATA, Media RSS. Custom fields: `content:encoded`, `media:thumbnail`, `media:content`, `yt:videoId`
 - **Article reader**: Mozilla Readability.js loaded from jsDelivr CDN (preloaded silently after first feed fetch)
 - **Article cache**: `localStorage` key `dailybao_feed_cache` — same-day cache, stale-while-revalidate on new day
 - **YouTube shorts cache**: `localStorage` key `dailybao_yt_short_cache` — maps `videoId` → `isShort` boolean, populated via YouTube oEmbed thumbnail aspect ratio, capped at 2000 entries (FIFO trim)
-- **Read-progress store**: `localStorage` key `dailybao_read_progress` — maps article `link` → `{pct, scrollTop, scrollHeight, elapsedMs, lastAt, …article meta}`, 42h TTL, deleted when pct ≥ 0.95. Populated by the reader scroll listener; `purgeExpiredProgress()` runs on auth
+- **Read-progress store**: `localStorage` key `dailybao_read_progress` — maps article `link` → `{pct, scrollTop, scrollHeight, elapsedMs, lastAt, …article meta}`, 42h TTL, deleted when pct ≥ 0.95. Also synced to Firestore `readProgress` field (debounced 2s during scroll, immediate on reader close) for cross-device access. `purgeExpiredProgress()` runs on auth
 - **Podcast audio state**: `localStorage` key `dailybao_audio_state` — playback position + rate, saved every 3s during playback
 
 ## File structure
@@ -35,15 +35,15 @@ README.md        — setup guide for deploying to Firebase
 - **CORS proxies raced in parallel** — all three proxies fire simultaneously; fastest response wins
 - **localStorage article cache** — same-day loads skip network entirely; stale cache shows instantly then refreshes in background
 - **Progressive feed rendering** — articles appear in UI as each feed resolves, not after all finish
-- **Incremental refresh** — manual refresh and background refresh merge new articles by URL dedup; nothing is flushed
-- **Firestore stores config only** — articles are never written to Firestore
+- **Incremental refresh** — on successful feed fetch, stale articles from that feed (no longer in RSS) are evicted from `allArticles`, then fresh ones are merged. Errored feeds keep their existing articles untouched
+- **Firestore stores config + read progress** — articles are never written to Firestore; only `feeds`, `categories`, and `readProgress` live there
 - **Single `app.js`** — all logic in one file intentionally; don't split unless it exceeds ~800 lines
 - **Theme persists via localStorage** — default is light (warm newspaper palette); user preference remembered across sessions
 - **Whole card is clickable** — article cards have no "Read →" button; clicking anywhere on the card opens the reader
 
 ## Article card design (Reeder-style)
 Each `.article-card` shows:
-- Top row: circular favicon (Google favicon API `?domain=…&sz=64`), feed name, author (`item.creator` / `dc:creator`), date
+- Header: favicon (left, spans both lines) + `.card-source-block` (right, two rows). Row 1: source name (truncates with `…`) + date. Row 2: author in 0.65rem + podcast badge (omitted if neither present). Source name uses `flex:1; overflow:hidden; text-overflow:ellipsis`
 - Body row: title + summary (left, flex), thumbnail (right, 76×76px, `object-fit: cover`)
 - Thumbnail sourced from: YouTube thumbnail > `media:thumbnail` > `media:content` (image) > image enclosure > first `<img src>` in content
 - `feedDomain` and `author` are extracted at parse time in `parseRSS()` / `parseRss2json()` and stored on each article object
@@ -67,13 +67,18 @@ Each `.article-card` shows:
 - `body.audio-active` adds bottom padding to `#feed-container` and `.reader-body` so the sticky bar doesn't cover content
 
 ## Read progress / Continue Reading
-- Scroll in `.reader-body` is tracked by `startReadSession(article)` which sets up a scroll listener + 5s timer. `persistProgress()` writes to `dailybao_read_progress` only when elapsed reading time ≥ 60s AND pct < 0.95. When pct crosses 0.95, the entry is deleted (article finished)
+- Scroll in `.reader-body` is tracked by `startReadSession(article)` which sets up a scroll listener + 5s timer
+- **New articles**: `persistProgress()` only writes once elapsed ≥ 60s (`PROGRESS_MIN_MS`). Before that threshold no entry is created — the article won't appear in Continue Reading from a quick skim
+- **Re-read articles** (opened from the Continue Reading list): `readSession.isContinueRead = true` is set at session start (detected via `getProgress(article.link)`). The 60s gate is skipped — progress saves immediately on any scroll or quit
+- When pct crosses 0.95: entry is deleted and `readSession._wasCompleted = true` is flagged. Subsequent `persistProgress` calls are no-ops (`_wasCompleted` guard). On `endReadSession`, a toast "Finished — removed from Continue Reading ✓" is shown
 - `endReadSession()` is called on reader back, backdrop dismiss, `pagehide`, and the next `openReader` call. Visibility changes pause/resume the elapsed-time counter
+- Progress is synced to Firestore on reader close (`syncProgressToFirestore`) and debounced during scroll (2s). On login, `loadProgressFromFirestore()` merges remote entries (newer `lastAt` wins per article)
 - On reader open, `restoreProgressScroll(article)` re-applies the saved scroll position on next animation frame using the current `scrollHeight` × saved `pct` (falls back to raw `scrollTop` if no dimensions)
 - Side panel "📖 Continue reading" block (`#continue-reading-block`) is hidden when empty; otherwise shows unfinished articles sorted by `lastAt desc`, each with title, feed, %, last-read time, delete ✕ button. Clicking re-opens the reader from cached metadata so it works even if the article has fallen out of `allArticles`
 
 ## Body scroll lock
-- `body.body-locked { overflow: hidden }` prevents the background feed's scrollbar from showing through the reader or settings panel. Toggled by `openPanel`, `openModal`, `closePanel`, `closeModal`, and `updateBodyLock()` (called whenever any overlay closes)
+- `body.body-locked { overflow: hidden }` + `body.body-locked #app-page { height: 100vh; overflow: hidden }` prevents background scroll and scrollbar bleed-through
+- `openPanel` and `openModal` save `_bodyScrollY = window.scrollY` and set `#feed-container.style.marginTop = -scrollY + 'px'` (only when not already locked) — this shifts the feed content up so it stays at the correct visual position behind the reader slide-over on desktop without a visible jump. `updateBodyLock()` clears the margin and calls `window.scrollTo(_bodyScrollY)` when the last overlay closes
 
 ## Section / tag system
 - Each feed has a `section` field — a free-form string (e.g. "World News", "Tech & AI", anything user types)
@@ -150,5 +155,5 @@ The `FIREBASE_CONFIG` object at the top of `app.js` is a placeholder. User fills
 - Do not add a build step (Webpack, Vite, etc.) unless user explicitly asks
 - Do not split into multiple JS files without asking
 - Do not add Cloud Functions — keep everything on the free Spark plan
-- Do not store articles in Firestore — only user feed config
+- Do not store articles in Firestore — only user feed config and read progress
 - Do not remove the personality copy (loading messages, tagline)
