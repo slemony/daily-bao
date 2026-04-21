@@ -269,6 +269,8 @@ async function loadUserFeeds() {
   renderFeedList();
   renderTabs();
   updateSectionsDatalist();
+  await loadProgressFromFirestore();
+  renderContinueReading();
 }
 
 async function saveUserFeeds() {
@@ -449,9 +451,19 @@ async function fetchAllFeeds({ silent = false } = {}) {
   const feedPromises = userFeeds.map(feed =>
     fetchFeed(feed)
       .then(articles => {
-        const fresh = articles.filter(a => !seenUrls.has(a.link));
+        const freshLinks = new Set(articles.map(a => a.link));
+
+        // Evict articles from this feed that no longer appear in the RSS
+        const before = allArticles.length;
+        allArticles = allArticles.filter(a => a.feedId !== feed.id || freshLinks.has(a.link));
+        const evicted = before - allArticles.length;
+
+        // Add articles not already present from any feed
+        const currentLinks = new Set(allArticles.map(a => a.link));
+        const fresh = articles.filter(a => !currentLinks.has(a.link));
         logFeed(feed.name, 'ok', `${fresh.length} new (${articles.length} total)`);
-        if (fresh.length) {
+
+        if (fresh.length || evicted > 0) {
           fresh.forEach(a => seenUrls.add(a.link));
           allArticles = [...fresh, ...allArticles];
           sortArticles();
@@ -597,10 +609,16 @@ function buildArticleCard(a, i) {
   card.innerHTML = `
     <div class="card-top">
       ${faviconUrl ? `<img class="card-favicon" src="${esc(faviconUrl)}" alt="" loading="lazy" onerror="this.remove()">` : ''}
-      <span class="card-source">${esc(a.feedName)}</span>
-      ${a.author ? `<span class="card-author">· ${esc(a.author)}</span>` : ''}
-      ${a.audio ? `<span class="card-podcast-badge">🎧 Podcast</span>` : ''}
-      <span class="card-date-top">${a.date ? formatDate(a.date) : ''}</span>
+      <div class="card-source-block">
+        <div class="card-source-row">
+          <span class="card-source">${esc(a.feedName)}</span>
+          <span class="card-date-top">${a.date ? formatDate(a.date) : ''}</span>
+        </div>
+        ${(a.author || a.audio) ? `<div class="card-author-row">
+          ${a.author ? `<span class="card-author">${esc(a.author)}</span>` : ''}
+          ${a.audio  ? `<span class="card-podcast-badge">🎧 Podcast</span>` : ''}
+        </div>` : ''}
+      </div>
     </div>
     <div class="card-body-row">
       <div class="card-text">
@@ -918,6 +936,8 @@ async function openReader(article) {
   }
 }
 
+let _bodyScrollY = 0;
+
 // =====================================================
 // READ PROGRESS (Continue Reading)
 // =====================================================
@@ -942,6 +962,7 @@ function loadProgress() {
 
 function saveProgressMap(map) {
   try { localStorage.setItem(PROGRESS_KEY, JSON.stringify(map)); } catch {}
+  debouncedSyncProgress(map);
 }
 
 function purgeExpiredProgress() {
@@ -990,12 +1011,23 @@ function persistProgress({ finalize = false } = {}) {
     readSession.visibleAt = Date.now();
   }
 
+  // Once completed, don't re-add to progress
+  if (readSession._wasCompleted) return;
+
   if (pct >= PROGRESS_DONE_THRESHOLD) {
-    removeProgress(article.link);
+    // Only notify if the article was actually tracked in Continue Reading
+    const map = loadProgress();
+    if (map[article.link]) {
+      delete map[article.link];
+      saveProgressMap(map);
+      readSession._wasCompleted = true;
+    }
     return;
   }
-  if (readSession.elapsedMs < PROGRESS_MIN_MS && !finalize) return;
-  if (readSession.elapsedMs < PROGRESS_MIN_MS && finalize) return;
+
+  // New articles: must read ≥ 1 min before tracking starts
+  // Re-opened "continue read" articles: save immediately
+  if (!readSession.isContinueRead && readSession.elapsedMs < PROGRESS_MIN_MS) return;
 
   const map = loadProgress();
   map[article.link] = {
@@ -1026,9 +1058,10 @@ function startReadSession(article) {
   endReadSession({ silent: true });
   readSession = {
     article,
-    openedAt:  Date.now(),
-    elapsedMs: 0,
-    visibleAt: document.visibilityState === 'visible' ? Date.now() : null,
+    openedAt:     Date.now(),
+    elapsedMs:    0,
+    visibleAt:    document.visibilityState === 'visible' ? Date.now() : null,
+    isContinueRead: !!getProgress(article.link), // re-read: skip 1-min gate
   };
 
   const body = document.getElementById('reader-body');
@@ -1046,7 +1079,10 @@ function endReadSession(opts = {}) {
   if (!opts.silent) persistProgress({ finalize: true });
   if (readSession.cleanup) readSession.cleanup();
   if (readSession.timer) clearInterval(readSession.timer);
+  const wasCompleted = readSession._wasCompleted;
   readSession = null;
+  if (!opts.silent) syncProgressToFirestore(loadProgress());
+  if (!opts.silent && wasCompleted) showToast('Finished — removed from Continue Reading ✓');
 }
 
 document.addEventListener('visibilitychange', () => {
@@ -1132,6 +1168,51 @@ function renderContinueReading() {
     });
     list.appendChild(item);
   });
+}
+
+// =====================================================
+// READ PROGRESS — FIRESTORE CROSS-DEVICE SYNC
+// =====================================================
+const PROGRESS_FIRESTORE_CAP = 30;
+
+function capProgressMap(map) {
+  const entries = Object.entries(map);
+  if (entries.length <= PROGRESS_FIRESTORE_CAP) return map;
+  entries.sort((a, b) => (b[1].lastAt || 0) - (a[1].lastAt || 0));
+  return Object.fromEntries(entries.slice(0, PROGRESS_FIRESTORE_CAP));
+}
+
+let _progressSyncTimer = null;
+function debouncedSyncProgress(map) {
+  clearTimeout(_progressSyncTimer);
+  _progressSyncTimer = setTimeout(() => syncProgressToFirestore(map), 2000);
+}
+
+async function syncProgressToFirestore(map) {
+  if (!currentUser) return;
+  try {
+    const ref = doc(db, 'users', currentUser.uid);
+    await setDoc(ref, { readProgress: capProgressMap(map) }, { merge: true });
+  } catch {}
+}
+
+async function loadProgressFromFirestore() {
+  if (!currentUser) return;
+  try {
+    const ref = doc(db, 'users', currentUser.uid);
+    const snap = await getDoc(ref);
+    const remote = snap.exists() ? (snap.data().readProgress || {}) : {};
+    if (!Object.keys(remote).length) return;
+    const local = loadProgress();
+    let changed = false;
+    for (const [link, entry] of Object.entries(remote)) {
+      if (!local[link] || (entry.lastAt || 0) > (local[link].lastAt || 0)) {
+        local[link] = entry;
+        changed = true;
+      }
+    }
+    if (changed) saveProgressMap(local);
+  } catch {}
 }
 
 function restoreProgressScroll(article) {
@@ -1947,6 +2028,10 @@ document.querySelectorAll('.quick-pill').forEach(btn => {
 // PANEL / MODAL CONTROLS
 // =====================================================
 function openPanel(id) {
+  if (!document.body.classList.contains('body-locked')) {
+    _bodyScrollY = window.scrollY;
+    document.body.style.top = `-${_bodyScrollY}px`;
+  }
   document.getElementById(id).classList.remove('hidden');
   requestAnimationFrame(() => document.getElementById(id).classList.add('open'));
   document.getElementById('panel-backdrop').classList.remove('hidden');
@@ -1958,6 +2043,10 @@ function closePanel(id) {
   updateBodyLock();
 }
 function openModal(id) {
+  if (!document.body.classList.contains('body-locked')) {
+    _bodyScrollY = window.scrollY;
+    document.body.style.top = `-${_bodyScrollY}px`;
+  }
   document.getElementById(id).classList.remove('hidden');
   document.body.classList.add('body-locked');
   // Reset form
@@ -1984,7 +2073,13 @@ function updateBodyLock() {
   const anyOpen =
     document.querySelectorAll('.side-panel.open, .reader-panel.open').length > 0 ||
     document.querySelectorAll('.modal-overlay:not(.hidden)').length > 0;
-  document.body.classList.toggle('body-locked', anyOpen);
+  if (anyOpen) {
+    document.body.classList.add('body-locked');
+  } else {
+    document.body.classList.remove('body-locked');
+    document.body.style.top = '';
+    window.scrollTo({ top: _bodyScrollY, behavior: 'instant' });
+  }
 }
 
 // Close buttons (data-close attribute)
