@@ -296,7 +296,7 @@ async function parseRSS(xmlText, feed) {
   const result = await rssParser.parseString(xmlText);
   const articles = result.items.slice(0, 15).map(item => {
     const rawSummary = item.contentEncoded || item.content || item.contentSnippet || item.summary || '';
-    const summary = rawSummary.replace(/<[^>]*>/g, '').trim().slice(0, 200);
+    const summary = decodeEntities(rawSummary.replace(/<[^>]*>/g, '').trim()).slice(0, 200);
 
     let videoId = item.ytVideoId || '';
     let thumbnail = '';
@@ -309,7 +309,7 @@ async function parseRSS(xmlText, feed) {
     }
 
     const link = item.link || item.guid || '';
-    const title = item.title || '';
+    const title = decodeEntities(item.title || '');
     if (!title || !link) return null;
 
     let feedDomain = '';
@@ -331,7 +331,7 @@ async function parseRSS(xmlText, feed) {
       title,
       summary,
       link,
-      author:    item.creator || item['dc:creator'] || item.author || '',
+      author:    decodeEntities(item.creator || item['dc:creator'] || item.author || ''),
       date:      item.isoDate ? new Date(item.isoDate) : (item.pubDate ? new Date(item.pubDate) : null),
       videoId,
       thumbnail,
@@ -339,7 +339,7 @@ async function parseRSS(xmlText, feed) {
       isCreator: feed.url.includes('youtube.com/feeds') || feed.url.includes('rsshub.app/xiaohongshu') || feed.url.includes('rsshub.app/xhslink') || feed.section === 'Creators',
     };
   }).filter(Boolean);
-  return applyYtFilter(articles, feed);
+  return applyYtFilter(mergeDuplicateTitles(articles), feed);
 }
 
 async function parseRss2json(json, feed) {
@@ -348,9 +348,9 @@ async function parseRss2json(json, feed) {
 
   const articles = json.items.slice(0, 15).map(item => {
     const rawSummary = item.content || item.description || '';
-    const summary = rawSummary.replace(/<[^>]*>/g, '').trim().slice(0, 200);
+    const summary = decodeEntities(rawSummary.replace(/<[^>]*>/g, '').trim()).slice(0, 200);
     const link = item.link || item.guid || '';
-    const title = item.title || '';
+    const title = decodeEntities(item.title || '');
     if (!title || !link) return null;
 
     let thumbnail = item.thumbnail || '';
@@ -380,7 +380,7 @@ async function parseRss2json(json, feed) {
       title,
       summary,
       link,
-      author:    item.author || '',
+      author:    decodeEntities(item.author || ''),
       date:      item.pubDate ? new Date(item.pubDate) : null,
       videoId,
       thumbnail,
@@ -388,7 +388,7 @@ async function parseRss2json(json, feed) {
       isCreator: feed.url.includes('youtube.com/feeds') || feed.url.includes('rsshub.app/xiaohongshu') || feed.url.includes('rsshub.app/xhslink') || feed.section === 'Creators',
     };
   }).filter(Boolean);
-  return applyYtFilter(articles, feed);
+  return applyYtFilter(mergeDuplicateTitles(articles), feed);
 }
 
 async function fetchFeed(feed) {
@@ -2141,6 +2141,49 @@ function updateLastUpdated() {
 // =====================================================
 function esc(str) {
   return String(str ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// Decode HTML entities (e.g. &#39; → ', &amp; → &). Some feeds double-encode
+// titles / summaries — this unwraps them once before we hand off to esc().
+function decodeEntities(s) {
+  if (!s) return '';
+  const ta = document.createElement('textarea');
+  ta.innerHTML = s;
+  return ta.value;
+}
+
+// Normalize a title for dedup: lowercase, collapse whitespace, strip common
+// trailing "(podcast)" / "[audio]" markers that Stratechery-style feeds use
+// to differentiate the audio variant from the written one.
+function normalizeTitle(t) {
+  return (t || '')
+    .toLowerCase()
+    .replace(/\s*[\[\(][^\]\)]*(podcast|audio|interview|listen)[^\]\)]*[\]\)]\s*$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// Merge articles that are the same story published twice (written + podcast).
+// Keep the first occurrence but steal audio / thumbnail / richer summary from
+// the sibling so the surviving card has all the signals.
+function mergeDuplicateTitles(articles) {
+  const byTitle = new Map();
+  const out = [];
+  for (const a of articles) {
+    const key = normalizeTitle(a.title);
+    if (!key) { out.push(a); continue; }
+    const existing = byTitle.get(key);
+    if (!existing) {
+      byTitle.set(key, a);
+      out.push(a);
+    } else {
+      if (!existing.audio && a.audio) existing.audio = a.audio;
+      if (!existing.thumbnail && a.thumbnail) existing.thumbnail = a.thumbnail;
+      if ((a.summary?.length || 0) > (existing.summary?.length || 0)) existing.summary = a.summary;
+      if (!existing.videoId && a.videoId) existing.videoId = a.videoId;
+    }
+  }
+  return out;
 }
 
 function formatDate(date) {
