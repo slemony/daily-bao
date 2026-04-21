@@ -2030,7 +2030,8 @@ document.querySelectorAll('.quick-pill').forEach(btn => {
 function openPanel(id) {
   if (!document.body.classList.contains('body-locked')) {
     _bodyScrollY = window.scrollY;
-    document.body.style.top = `-${_bodyScrollY}px`;
+    const fc = document.getElementById('feed-container');
+    if (fc) fc.style.marginTop = _bodyScrollY > 0 ? `-${_bodyScrollY}px` : '';
   }
   document.getElementById(id).classList.remove('hidden');
   requestAnimationFrame(() => document.getElementById(id).classList.add('open'));
@@ -2045,7 +2046,8 @@ function closePanel(id) {
 function openModal(id) {
   if (!document.body.classList.contains('body-locked')) {
     _bodyScrollY = window.scrollY;
-    document.body.style.top = `-${_bodyScrollY}px`;
+    const fc = document.getElementById('feed-container');
+    if (fc) fc.style.marginTop = _bodyScrollY > 0 ? `-${_bodyScrollY}px` : '';
   }
   document.getElementById(id).classList.remove('hidden');
   document.body.classList.add('body-locked');
@@ -2077,7 +2079,8 @@ function updateBodyLock() {
     document.body.classList.add('body-locked');
   } else {
     document.body.classList.remove('body-locked');
-    document.body.style.top = '';
+    const fc = document.getElementById('feed-container');
+    if (fc) fc.style.marginTop = '';
     window.scrollTo({ top: _bodyScrollY, behavior: 'instant' });
   }
 }

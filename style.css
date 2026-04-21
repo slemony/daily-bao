@@ -79,8 +79,10 @@ body {
 }
 
 /* Lock background scroll while a panel/modal is open.
-   position:fixed + top:-scrollY prevents the visible jump that overflow:hidden causes. */
-body.body-locked { position: fixed; width: 100%; overflow-y: scroll; }
+   overflow:hidden stops body scroll; margin-top:-scrollY on #feed-container
+   keeps the visible feed content at the correct position (no jump on desktop). */
+body.body-locked { overflow: hidden; }
+body.body-locked #app-page { height: 100vh; overflow: hidden; }
 
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }

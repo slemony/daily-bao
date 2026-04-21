@@ -77,8 +77,8 @@ Each `.article-card` shows:
 - Side panel "📖 Continue reading" block (`#continue-reading-block`) is hidden when empty; otherwise shows unfinished articles sorted by `lastAt desc`, each with title, feed, %, last-read time, delete ✕ button. Clicking re-opens the reader from cached metadata so it works even if the article has fallen out of `allArticles`
 
 ## Body scroll lock
-- Uses `position: fixed; width: 100%; overflow-y: scroll` on `body.body-locked` (NOT `overflow: hidden`) — the `position:fixed + top:-scrollY` technique prevents the visible scroll-jump that `overflow:hidden` causes when the reader slide-over opens on desktop
-- `openPanel` and `openModal` save `_bodyScrollY = window.scrollY` and set `body.style.top = -scrollY + 'px'` before adding the class (only when not already locked). `updateBodyLock()` restores `window.scrollTo(_bodyScrollY)` and clears `body.style.top` when the last overlay closes
+- `body.body-locked { overflow: hidden }` + `body.body-locked #app-page { height: 100vh; overflow: hidden }` prevents background scroll and scrollbar bleed-through
+- `openPanel` and `openModal` save `_bodyScrollY = window.scrollY` and set `#feed-container.style.marginTop = -scrollY + 'px'` (only when not already locked) — this shifts the feed content up so it stays at the correct visual position behind the reader slide-over on desktop without a visible jump. `updateBodyLock()` clears the margin and calls `window.scrollTo(_bodyScrollY)` when the last overlay closes
 
 ## Section / tag system
 - Each feed has a `section` field — a free-form string (e.g. "World News", "Tech & AI", anything user types)
