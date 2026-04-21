@@ -563,7 +563,7 @@ function renderFeed() {
         clearFn();
         renderFeedList();
         renderFeed();
-        window.scrollTo({ top: 0, behavior: 'smooth' });
+        _feedContainer()?.scrollTo({ top: 0, behavior: 'smooth' });
       });
     } else {
       chip.classList.add('hidden');
@@ -936,7 +936,7 @@ async function openReader(article) {
   }
 }
 
-let _bodyScrollY = 0;
+const _feedContainer = () => document.getElementById('feed-container');
 
 // =====================================================
 // READ PROGRESS (Continue Reading)
@@ -1418,7 +1418,7 @@ function renderFeedList() {
       renderFeedList();
       renderFeed();
       closePanel('settings-panel');
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+      _feedContainer()?.scrollTo({ top: 0, behavior: 'smooth' });
     };
 
     const countSpan = document.createElement('span');
@@ -1550,7 +1550,7 @@ function renderFeedList() {
         renderFeed();
         renderFeedList();
         closePanel('settings-panel');
-        window.scrollTo({ top: 0, behavior: 'smooth' });
+        _feedContainer()?.scrollTo({ top: 0, behavior: 'smooth' });
       };
       el.querySelector('.feed-item-info').addEventListener('click', filterByFeed);
       el.querySelector('.feed-item-info').addEventListener('touchend', filterByFeed, { passive: false });
@@ -2028,11 +2028,6 @@ document.querySelectorAll('.quick-pill').forEach(btn => {
 // PANEL / MODAL CONTROLS
 // =====================================================
 function openPanel(id) {
-  if (!document.body.classList.contains('body-locked')) {
-    _bodyScrollY = window.scrollY;
-    const fc = document.getElementById('feed-container');
-    if (fc) fc.style.marginTop = _bodyScrollY > 0 ? `-${_bodyScrollY}px` : '';
-  }
   document.getElementById(id).classList.remove('hidden');
   requestAnimationFrame(() => document.getElementById(id).classList.add('open'));
   document.getElementById('panel-backdrop').classList.remove('hidden');
@@ -2044,11 +2039,6 @@ function closePanel(id) {
   updateBodyLock();
 }
 function openModal(id) {
-  if (!document.body.classList.contains('body-locked')) {
-    _bodyScrollY = window.scrollY;
-    const fc = document.getElementById('feed-container');
-    if (fc) fc.style.marginTop = _bodyScrollY > 0 ? `-${_bodyScrollY}px` : '';
-  }
   document.getElementById(id).classList.remove('hidden');
   document.body.classList.add('body-locked');
   // Reset form
@@ -2079,9 +2069,6 @@ function updateBodyLock() {
     document.body.classList.add('body-locked');
   } else {
     document.body.classList.remove('body-locked');
-    const fc = document.getElementById('feed-container');
-    if (fc) fc.style.marginTop = '';
-    window.scrollTo({ top: _bodyScrollY, behavior: 'instant' });
   }
 }
 
@@ -2428,7 +2415,7 @@ const PTR_READY_MSGS = [
   const PTR_THRESHOLD = 70;
 
   document.addEventListener('touchstart', e => {
-    if (window.scrollY === 0 && !refreshBtn.classList.contains('spinning')) {
+    if ((_feedContainer()?.scrollTop ?? 0) === 0 && !refreshBtn.classList.contains('spinning')) {
       ptrStartY = e.touches[0].clientY;
       ptrActive = true;
       wasReady = false;
