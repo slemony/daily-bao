@@ -113,6 +113,7 @@ const rssParser = new RSSParser({
     item: [
       ['content:encoded', 'contentEncoded'],
       ['media:thumbnail', 'mediaThumbnail'],
+      ['media:content',   'mediaContent'],
       ['yt:videoId', 'ytVideoId'],
     ],
   },
@@ -301,7 +302,19 @@ async function parseRSS(xmlText, feed) {
     let videoId = item.ytVideoId || '';
     let thumbnail = '';
     if (videoId) thumbnail = `https://img.youtube.com/vi/${videoId}/mqdefault.jpg`;
-    if (item.mediaThumbnail) thumbnail = item.mediaThumbnail['$']?.url || thumbnail;
+    // media:thumbnail
+    if (item.mediaThumbnail) thumbnail = item.mediaThumbnail['$']?.url || item.mediaThumbnail?.url || thumbnail;
+    // media:content (e.g. Ars Technica) — may be object or array
+    if (!thumbnail && item.mediaContent) {
+      const mc = Array.isArray(item.mediaContent) ? item.mediaContent[0] : item.mediaContent;
+      const attrs = mc?.['$'] || mc || {};
+      const mcUrl = attrs.url || mc?.url || '';
+      if (mcUrl && (!attrs.medium || attrs.medium === 'image')) thumbnail = mcUrl;
+    }
+    // image enclosure (some feeds serve thumbnail via <enclosure type="image/...">)
+    const enc = item.enclosure;
+    if (!thumbnail && enc?.url && /^image\//i.test(enc.type || '')) thumbnail = enc.url;
+    // fallback: first <img> in content
     if (!thumbnail) {
       const raw = item.contentEncoded || item.content || '';
       const m = raw.match(/<img[^>]+src=["']([^"']+)["']/i);
@@ -316,7 +329,6 @@ async function parseRSS(xmlText, feed) {
     try { feedDomain = new URL(feed.url).hostname.replace(/^www\./, ''); } catch {}
 
     let audio = null;
-    const enc = item.enclosure;
     if (enc && enc.url && (!enc.type || /^audio\//i.test(enc.type))) {
       audio = { url: enc.url, type: enc.type || 'audio/mpeg', length: enc.length || '' };
     }
@@ -546,6 +558,16 @@ function renderFeed() {
     }
   }
 
+  // Hide the error chip whenever a feed or section filter is active
+  const errorChip = document.getElementById('feed-error-chip');
+  if (errorChip) {
+    if (activeFeed || (activeSection && activeSection !== 'all')) {
+      errorChip.classList.add('hidden');
+    } else {
+      updateFeedErrorChip(feedLogs.filter(l => l.status === 'error').length);
+    }
+  }
+
   if (articles.length === 0) {
     empty.classList.remove('hidden');
     return;
@@ -709,6 +731,33 @@ function cleanReaderContent(html, bylineText) {
     }
   });
 
+  // Remove inline SVGs — decorative section icons / UI chrome that leak through
+  // Readability (e.g. Ars Technica category icons). Real diagrams use <img src="...svg">.
+  tpl.content.querySelectorAll('svg').forEach(svg => {
+    const parent = svg.parentElement;
+    svg.remove();
+    if (parent && !parent.textContent.trim() &&
+        ['SPAN', 'DIV', 'P', 'A'].includes(parent.tagName)) {
+      parent.remove();
+    }
+  });
+
+  // Convert orphaned short <span> elements left after SVG removal into styled
+  // opener phrases (e.g. Ars Technica's article teaser line).
+  const BLOCK_TAGS = new Set(['P','DIV','H1','H2','H3','H4','H5','H6','LI','BLOCKQUOTE','TD','TH','ARTICLE','SECTION']);
+  tpl.content.querySelectorAll('span').forEach(span => {
+    // Skip spans that are inline children of block text
+    if (BLOCK_TAGS.has(span.parentElement?.tagName || '')) return;
+    // Skip if it contains block-level children
+    if (span.querySelector('p,div,h1,h2,h3,ul,ol,table,figure')) return;
+    const text = (span.textContent || '').trim();
+    if (!text || text.length > 280) return;
+    const opener = document.createElement('p');
+    opener.className = 'reader-opener';
+    opener.textContent = text;
+    span.replaceWith(opener);
+  });
+
   // Drop empty <li> (Verge sprinkles these in) and collapse empty lists.
   tpl.content.querySelectorAll('li').forEach(li => {
     const hasText  = (li.textContent || '').trim().length > 0;
@@ -752,6 +801,17 @@ function cleanReaderContent(html, bylineText) {
     }
     break;
   }
+
+  // Deduplicate identical short text blocks — catches repeated credit / caption
+  // lines (e.g. "Credit: Aurich Lawson | Getty Images" appearing twice).
+  const seenShortTexts = new Set();
+  tpl.content.querySelectorAll('p, div, figcaption, cite, span').forEach(el => {
+    const text = (el.textContent || '').trim();
+    if (!text || text.length > 220) return; // only short blocks
+    const key = text.toLowerCase().replace(/\s+/g, ' ');
+    if (seenShortTexts.has(key)) { el.remove(); }
+    else { seenShortTexts.add(key); }
+  });
 
   return tpl.innerHTML;
 }
@@ -1270,8 +1330,7 @@ function renderFeedList() {
     labelSpan.className = 'feed-section-label';
     labelSpan.textContent = sectionLabel(secName);
     labelSpan.title = 'Click to filter by this category';
-    labelSpan.addEventListener('click', e => {
-      e.preventDefault(); e.stopPropagation();
+    const filterBySection = () => {
       activeFeed = null;
       activeSection = activeSection === secName ? 'all' : secName;
       renderTabs();
@@ -1279,7 +1338,7 @@ function renderFeedList() {
       renderFeed();
       closePanel('settings-panel');
       window.scrollTo({ top: 0, behavior: 'smooth' });
-    });
+    };
 
     const countSpan = document.createElement('span');
     countSpan.className = 'feed-section-count';
@@ -1340,18 +1399,43 @@ function renderFeedList() {
       renderFeed();
     });
 
+    const toggleBtn = document.createElement('button');
+    toggleBtn.className = 'feed-section-toggle';
+    toggleBtn.title = 'Expand / collapse';
+    toggleBtn.setAttribute('aria-label', 'Expand / collapse');
+    toggleBtn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>`;
+
     summary.appendChild(labelSpan);
     summary.appendChild(renameBtn);
     if (feeds.length === 0) summary.appendChild(deleteBtn);
     summary.appendChild(countSpan);
+    summary.appendChild(toggleBtn);
+
+    // summary click routing: toggleBtn → collapse/expand; rename/delete → their handlers; else → filter
+    summary.addEventListener('click', e => {
+      e.preventDefault(); // always block native <details> toggle
+      if (e.target.closest('.feed-section-toggle')) { details.classList.toggle('collapsed'); return; }
+      if (e.target.closest('.btn-rename-section')) return;
+      filterBySection();
+    });
+    summary.addEventListener('touchend', e => {
+      if (e.target.closest('.btn-rename-section')) return;
+      e.preventDefault();
+      if (e.target.closest('.feed-section-toggle')) { details.classList.toggle('collapsed'); return; }
+      filterBySection();
+    }, { passive: false });
+
     details.appendChild(summary);
+
+    const contentInner = document.createElement('div');
+    contentInner.className = 'feed-section-content-inner';
 
     if (feeds.length === 0) {
       const hint = document.createElement('div');
       hint.className = 'continue-empty';
       hint.style.padding = '0.4rem 0.9rem';
       hint.textContent = 'No sources yet — use "+ Add" to add one here.';
-      details.appendChild(hint);
+      contentInner.appendChild(hint);
     }
 
     feeds.forEach(feed => {
@@ -1377,14 +1461,18 @@ function renderFeedList() {
       `;
 
       // Click the info area to filter by this feed
-      el.querySelector('.feed-item-info').addEventListener('click', () => {
+      const filterByFeed = e => {
+        if (el.classList.contains('actions-visible')) return;
+        e.preventDefault();
         activeFeed = activeFeed === feed.id ? null : feed.id;
         activeSection = 'all';
         renderFeed();
         renderFeedList();
         closePanel('settings-panel');
         window.scrollTo({ top: 0, behavior: 'smooth' });
-      });
+      };
+      el.querySelector('.feed-item-info').addEventListener('click', filterByFeed);
+      el.querySelector('.feed-item-info').addEventListener('touchend', filterByFeed, { passive: false });
 
       // Long-press on mobile to reveal edit/delete
       let lpTimer = null;
@@ -1427,8 +1515,13 @@ function renderFeedList() {
 
       el.querySelector('.btn-edit').addEventListener('click', (e) => { e.stopPropagation(); openEditFeed(feed.id); });
       el.querySelector('.btn-remove').addEventListener('click', (e) => { e.stopPropagation(); removeFeed(feed.id); });
-      details.appendChild(el);
+      contentInner.appendChild(el);
     });
+
+    const contentDiv = document.createElement('div');
+    contentDiv.className = 'feed-section-content';
+    contentDiv.appendChild(contentInner);
+    details.appendChild(contentDiv);
 
     list.appendChild(details);
   });
@@ -1438,9 +1531,9 @@ function renderFeedList() {
   const chevron = document.getElementById('feed-list-chevron');
   toggle.onclick = () => {
     const allDetails = list.querySelectorAll('details');
-    const anyOpen = [...allDetails].some(d => d.open);
-    allDetails.forEach(d => d.open = !anyOpen);
-    chevron.classList.toggle('collapsed', anyOpen);
+    const anyExpanded = [...allDetails].some(d => !d.classList.contains('collapsed'));
+    allDetails.forEach(d => d.classList.toggle('collapsed', anyExpanded));
+    chevron.classList.toggle('collapsed', anyExpanded);
   };
 }
 
@@ -1546,6 +1639,9 @@ document.getElementById('save-edit-btn').addEventListener('click', async () => {
     updated.ytFilter = sel ? sel.value : (updated.ytFilter || 'all');
   }
   userFeeds[idx] = updated;
+  allArticles = allArticles.map(a =>
+    a.feedId === editingFeedId ? { ...a, section: updated.section } : a
+  );
 
   await saveUserFeeds();
   renderFeedList();

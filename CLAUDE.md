@@ -9,7 +9,7 @@ A personal news reader web app that replaces social media. Free, cloud-hosted on
 - **Database**: Firestore — stores per-user feed config (`/users/{uid}` → `{ feeds: [...], categories: [...] }`). `categories` is the list of user-created section names, including empty ones that have no feeds yet
 - **Hosting**: Firebase Hosting (`firebase deploy`)
 - **RSS fetching**: Client-side — direct fetch + 3 CORS proxies (allorigins, codetabs, cors.lol) raced with `Promise.any`, 8s timeout; rss2json.com as final fallback if all fail
-- **RSS parsing**: `rss-parser@3` loaded from jsDelivr CDN (global `RSSParser`); handles `content:encoded`, Atom `<content>`, CDATA, Media RSS
+- **RSS parsing**: `rss-parser@3` loaded from jsDelivr CDN (global `RSSParser`); handles `content:encoded`, Atom `<content>`, CDATA, Media RSS. Custom fields: `content:encoded`, `media:thumbnail`, `media:content`, `yt:videoId`
 - **Article reader**: Mozilla Readability.js loaded from jsDelivr CDN (preloaded silently after first feed fetch)
 - **Article cache**: `localStorage` key `dailybao_feed_cache` — same-day cache, stale-while-revalidate on new day
 - **YouTube shorts cache**: `localStorage` key `dailybao_yt_short_cache` — maps `videoId` → `isShort` boolean, populated via YouTube oEmbed thumbnail aspect ratio, capped at 2000 entries (FIFO trim)
@@ -45,15 +45,18 @@ README.md        — setup guide for deploying to Firebase
 Each `.article-card` shows:
 - Top row: circular favicon (Google favicon API `?domain=…&sz=64`), feed name, author (`item.creator` / `dc:creator`), date
 - Body row: title + summary (left, flex), thumbnail (right, 76×76px, `object-fit: cover`)
-- Thumbnail sourced from: YouTube thumbnail > media:thumbnail > first `<img src>` in content
+- Thumbnail sourced from: YouTube thumbnail > `media:thumbnail` > `media:content` (image) > image enclosure > first `<img src>` in content
 - `feedDomain` and `author` are extracted at parse time in `parseRSS()` / `parseRss2json()` and stored on each article object
+- Mobile feed grid gap is `0.5rem` (vs `1rem` on desktop) for tighter card spacing
 
 ## Feed source filter
-- `activeFeed` global (null = show all) — set by clicking a feed's name in the settings panel
+- `activeFeed` global (null = show all) — set by clicking/tapping a feed's name in the settings panel
 - Clicking closes the panel, filters `renderFeed()` to that feed's articles, and smooth-scrolls the page to the top
 - When active, `#feed-filter-chip` appears inline in the header next to "The Daily Bao" — shows `· [name] ✕`; clicking ✕ clears the filter and scrolls to top
 - Active feed item is highlighted with `.feed-item-active` class
 - Scroll-to-top is only wired to filter clicks, NOT inside `renderFeed()` — background refresh must not disrupt scroll position
+- The `⚠ N feeds failed` error chip in the header is **hidden** whenever any feed or section filter is active — only shown on the unfiltered "all" view
+- After editing a feed's section, `allArticles` is patched in place (`.section` field updated) so `renderFeed()` immediately reflects the new section without a full refetch
 
 ## Podcast audio player
 - `<div id="audio-player">` in `index.html` is a persistent sticky bottom bar with a hidden `<audio id="audio-el">` inside. Survives reader dismissal — the user can browse the feed while listening
@@ -77,7 +80,10 @@ Each `.article-card` shows:
 - Sections are user-defined: the section input in add/edit modals is a text field with `<datalist id="sections-datalist">` showing existing section names as suggestions
 - `renderTabs()` builds nav tabs dynamically from unique sections in `userFeeds`; `updateSectionsDatalist()` keeps the datalist in sync — both called after any feed add/edit/delete/load
 - Section tabs (`#section-tabs`) and language filter (`#lang-filter`) are currently hidden (`class="hidden"`) — sections are managed via settings panel only
-- Each section header in settings has a `✎` rename button (hover to reveal) — renames all feeds in that section in bulk; empty categories also show a 🗑 button to delete them
+- Each section header in settings has a `✎` rename button (hover to reveal, left of count badge) — renames all feeds in that section in bulk; empty categories also show a 🗑 button to delete them
+- **Section header interaction**: tapping the label or empty space → filters feed to that section (single tap on mobile via `touchend`); tapping the count badge or chevron button → expand/collapse the category
+- Expand/collapse uses a `.collapsed` CSS class on the `<details>` element (NOT `details.open`) — content is always in the DOM (`details.open = true` always), animated via `grid-template-rows: 1fr → 0fr` transition on `.feed-section-content-inner` wrapper
+- Chevron indicator is `<button class="feed-section-toggle">` with an SVG — points down (expanded) or left (collapsed, `rotate(-90deg)`)
 - Clicking a section label in the settings panel filters the feed to that section (sets `activeSection`), closes the panel, and shows the section chip in the header with a ✕ clear button. Same chip slot is reused for both feed and section filters (only one active at a time)
 - A **`+ New category`** button below the feed list lets users add empty categories (e.g. Sports, Gaming) that persist in Firestore `categories[]` even before any feeds use them
 - Feed items are HTML5-draggable within and across categories. Dropping on a feed item reorders it (above/below based on cursor Y) and reassigns its `section` to the target's section. Visual drop indicators via `.feed-item.drop-above` / `.drop-below`
@@ -89,7 +95,8 @@ Each `.article-card` shows:
 - Edit and Delete buttons are hidden by default (`opacity: 0; pointer-events: none`)
 - **Desktop**: buttons fade in on `.feed-item:hover`
 - **Mobile**: long-press (600ms touchstart timer) adds `.actions-visible` class; tapping outside clears it
-- Clicking the feed name area filters by that feed (separate from the action buttons)
+- Tapping the feed name area (`.feed-item-info`) filters by that feed — wired to both `click` and `touchend` (single tap works on mobile without delay)
+- Section rename input (`section-rename-input`) has `flex: 1` so it occupies the same space as the label — ✎ and count badge stay right-aligned during rename
 - **Mobile swipe**: swipe from the right edge of the screen (within 30px) leftward 60px+ opens settings panel
 
 ## Mobile UX
@@ -106,6 +113,9 @@ Each `.article-card` shows:
 - `cleanReaderContent()` strips inline `width`/`height` attributes and styles from all `<img>` tags after the lazy-load replacement pass
 - Also dedupes images by normalized src (strips query string, Vox-style `-NNNN` size suffixes, `/WxH/` resize segments) — fixes Verge articles that render the hero image twice; removes the parent `<figure>` if it becomes empty
 - Strips empty `<li>` elements (no text, no media) and any `<ul>`/`<ol>` that end up empty — fixes stray bullet dots in Verge articles
+- **Inline SVG removal**: all `<svg>` elements in reader content are stripped (they are always decorative section icons / UI chrome; real diagrams use `<img src="...svg">`)
+- **Opener phrase**: orphaned `<span>` elements ≤ 280 chars left after SVG removal are converted to `<p class="reader-opener">` — styled in Space Grotesk italic (sans-serif) with accent left border, clearly distinct from Playfair Display body prose. Drop cap skips `.reader-opener` and applies to the first real paragraph
+- **Credit/caption dedup**: final pass removes any repeated short text block (≤ 220 chars) across `p`, `div`, `figcaption`, `cite`, `span` — prevents duplicate "Credit: Author | Getty" lines
 
 ## Firebase config
 The `FIREBASE_CONFIG` object at the top of `app.js` is a placeholder. User fills it in from Firebase Console → Project Settings → Your Apps. Do not commit real API keys.

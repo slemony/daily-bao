@@ -342,17 +342,16 @@ button { cursor: pointer; font-family: var(--font-main); border: none; backgroun
   min-width: 0;
 }
 .header-title {
-  font-size: 1rem;
+  font-size: clamp(0.65rem, 4vw, 1rem);
   font-weight: 700;
   letter-spacing: -0.02em;
   line-height: 1.1;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 .last-updated {
-  font-size: 0.65rem;
+  font-size: clamp(0.45rem, 2vw, 0.65rem);
   color: var(--text-dim);
+  white-space: nowrap;
 }
 .feed-error-chip {
   font-size: 0.7rem;
@@ -905,6 +904,41 @@ button { cursor: pointer; font-family: var(--font-main); border: none; backgroun
   border: 1px solid var(--border); border-radius: 99px;
   padding: 0.1rem 0.45rem; color: var(--text-dim);
 }
+/* Chevron toggle button */
+.feed-section-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem; height: 2rem;
+  margin: -0.5rem -0.25rem; /* extend tap area without layout shift */
+  padding: 0.5rem 0.25rem;
+  color: var(--text-dim);
+  border-radius: 6px;
+  flex-shrink: 0;
+  transition: color var(--transition);
+}
+.feed-section-toggle:hover { color: var(--text); }
+.feed-section-toggle svg {
+  display: block;
+  transition: transform 0.25s ease;
+}
+/* Expanded = chevron points down (default). Collapsed = chevron points left. */
+.feed-section-group.collapsed .feed-section-toggle svg {
+  transform: rotate(-90deg);
+}
+/* Animated content wrapper */
+.feed-section-content {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 0.25s ease;
+}
+.feed-section-group.collapsed .feed-section-content {
+  grid-template-rows: 0fr;
+}
+.feed-section-content-inner {
+  min-height: 0;
+  overflow: hidden;
+}
 .feed-section-group .feed-item { margin-bottom: 0.4rem; }
 .feed-section-group .feed-item:last-child { margin-bottom: 0.55rem; }
 .btn-rename-section {
@@ -914,9 +948,10 @@ button { cursor: pointer; font-family: var(--font-main); border: none; backgroun
 }
 .feed-section-group summary:hover .btn-rename-section { opacity: 1; }
 .section-rename-input {
+  flex: 1; min-width: 0;
   background: var(--bg-elevated); border: 1px solid var(--accent);
   border-radius: 4px; color: var(--text); font-size: 0.72rem;
-  font-weight: 600; padding: 0.1rem 0.35rem; width: 120px;
+  font-weight: 600; padding: 0.1rem 0.35rem;
   font-family: var(--font-main);
 }
 
@@ -1311,7 +1346,23 @@ button { cursor: pointer; font-family: var(--font-main); border: none; backgroun
 }
 
 /* Drop cap — only when first child is a paragraph */
-.reader-prose > p:first-child::first-letter {
+/* Opener phrase — teaser / intro line (e.g. Ars Technica section teasers).
+   Uses sans-serif so it reads as a label, not body prose. */
+.reader-prose .reader-opener {
+  font-family: var(--font-main);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: var(--text-muted);
+  border-left: 2px solid var(--accent);
+  padding: 0.1rem 0 0.1rem 0.75rem;
+  margin: 0 0 1.5rem;
+  text-indent: 0 !important;
+}
+/* Opener never gets the drop cap; the first real paragraph after it does */
+.reader-prose > p:first-child:not(.reader-opener)::first-letter,
+.reader-prose > .reader-opener + p::first-letter {
   float: left;
   font-family: var(--font-serif-display);
   font-size: 5.2em;
@@ -1410,7 +1461,8 @@ button { cursor: pointer; font-family: var(--font-main); border: none; backgroun
   text-align: left;
   hyphens: manual;
 }
-.reader-prose.is-cjk > p:first-child::first-letter {
+.reader-prose.is-cjk > p:first-child:not(.reader-opener)::first-letter,
+.reader-prose.is-cjk > .reader-opener + p::first-letter {
   font-size: 3em;
   line-height: 1;
   padding: 0.05em 0.12em 0 0;
@@ -1717,6 +1769,7 @@ body.audio-active .reader-body { padding-bottom: 7rem; }
    SECTION CLICK-TO-FILTER + DRAG HANDLES
    ===================================================== */
 .feed-section-group summary .feed-section-label {
+  flex: 1;
   cursor: pointer;
   transition: color var(--transition);
 }
@@ -1781,7 +1834,7 @@ body.audio-active .reader-body { padding-bottom: 7rem; }
    RESPONSIVE
    ===================================================== */
 @media (max-width: 600px) {
-  .feed-grid { grid-template-columns: 1fr; }
+  .feed-grid { grid-template-columns: 1fr; gap: 0.5rem; }
   #section-tabs { padding: 0.5rem 0.75rem 0; }
   #lang-filter { padding: 0.4rem 0.75rem 0.6rem; }
   #feed-container { padding: 0.5rem 0.75rem 2rem; }
