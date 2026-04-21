@@ -1344,6 +1344,23 @@ button { cursor: pointer; font-family: var(--font-main); border: none; backgroun
   margin: 1.25rem 0 1.75rem;
 }
 
+/* RSS fallback notice — shown when Readability got too little and we're using feed excerpt */
+.reader-rss-notice {
+  font-family: var(--font-main);
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 1.5rem;
+}
+.reader-rss-notice a {
+  color: var(--accent);
+  text-decoration: none;
+}
+.reader-rss-notice a:hover { text-decoration: underline; }
+
 /* Body prose */
 .reader-prose {
   font-family: var(--font-serif-body);
