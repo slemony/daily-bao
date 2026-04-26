@@ -253,12 +253,15 @@ async function loadUserFeeds() {
     const snap = await getDoc(ref);
     if (snap.exists()) {
       const data = snap.data();
-      userFeeds      = data.feeds || DEFAULT_FEEDS;
+      userFeeds      = data.feeds?.length ? [...data.feeds] : [...DEFAULT_FEEDS];
       userCategories = Array.isArray(data.categories) ? data.categories : [];
     } else {
+      // New user — show defaults in memory but do NOT write to Firestore.
+      // The document is created on the first explicit feed change (add/edit/delete).
+      // This prevents accidental overwrites if snap.exists() returns false
+      // on an existing user's device due to a network or cache issue.
       userFeeds = [...DEFAULT_FEEDS];
       userCategories = [];
-      await saveUserFeeds();
     }
   } catch (e) {
     console.warn('Firestore unavailable, using defaults:', e.message);
@@ -443,6 +446,13 @@ function sortArticles() {
 async function fetchAllFeeds({ silent = false } = {}) {
   if (!silent) setLoadingState(true);
 
+  // Guard: no feeds configured — unhide loading overlay and show empty state
+  if (userFeeds.length === 0) {
+    if (!silent) setLoadingState(false);
+    renderFeed();
+    return;
+  }
+
   // Deduplicate against existing articles
   const seenUrls = new Set(allArticles.map(a => a.link));
 
@@ -483,6 +493,8 @@ async function fetchAllFeeds({ silent = false } = {}) {
           updateLastUpdated();
           if (!silent) setLoadingState(false);
           if (anyNew) saveCache();
+          // Always render at end — shows empty state if every feed failed
+          if (!anyNew) renderFeed();
           updateFeedErrorChip(failedCount);
           updateLogsSummary();
           // Warm up Readability so first article open is instant
