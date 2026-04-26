@@ -162,6 +162,47 @@
     </div>
   </aside>
 
+  <!-- ===================== PROFILE / LANGUAGE MODAL ===================== -->
+  <div id="lang-pref-modal" class="modal-overlay hidden">
+    <div class="modal-card modal-card-narrow">
+      <div class="modal-header">
+        <h3>👤 Profile</h3>
+        <button class="panel-close" data-close="lang-pref-modal">✕</button>
+      </div>
+      <div class="modal-body">
+        <div id="profile-info" class="account-info"></div>
+        <hr class="divider" />
+        <div class="form-group">
+          <label>Translate articles into</label>
+          <select id="preferred-lang-select">
+            <option value="">— Off (no translation) —</option>
+            <option value="zh-TW">Traditional Chinese (繁體)</option>
+            <option value="zh-CN">Simplified Chinese (简体)</option>
+            <option value="ms">Malay (Bahasa Melayu)</option>
+            <option value="ja">Japanese (日本語)</option>
+            <option value="ko">Korean (한국어)</option>
+            <option value="en">English</option>
+            <option value="es">Spanish (Español)</option>
+            <option value="fr">French (Français)</option>
+            <option value="de">German (Deutsch)</option>
+            <option value="ar">Arabic (العربية)</option>
+            <option value="hi">Hindi (हिन्दी)</option>
+            <option value="th">Thai (ภาษาไทย)</option>
+            <option value="vi">Vietnamese (Tiếng Việt)</option>
+            <option value="pt">Portuguese (Português)</option>
+            <option value="id">Indonesian (Bahasa Indonesia)</option>
+            <option value="ru">Russian (Русский)</option>
+          </select>
+        </div>
+        <p class="section-hint">Per-source translation mode is set in each source's edit screen.</p>
+      </div>
+      <div class="modal-footer">
+        <button id="save-lang-btn" class="btn-primary">Save</button>
+        <button class="btn-ghost" data-close="lang-pref-modal">Cancel</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ===================== DEBUG LOG MODAL ===================== -->
   <div id="debug-modal" class="modal-overlay hidden">
     <div class="modal-card modal-card-wide">
@@ -212,6 +253,15 @@
               <option value="Other">Other</option>
             </select>
           </div>
+        </div>
+
+        <div class="form-group hidden" id="feed-translate-group">
+          <label>Translation <span class="hint">(for this source)</span></label>
+          <select id="feed-translate">
+            <option value="off">Off</option>
+            <option value="auto">Auto-translate on open</option>
+            <option value="manual">Translate on long press</option>
+          </select>
         </div>
 
         <div class="quick-add-section">
@@ -299,6 +349,14 @@
             <label><input type="radio" name="edit-yt-filter" value="all"> Both</label>
           </fieldset>
         </div>
+        <div class="form-group hidden" id="edit-translate-group">
+          <label>Translation <span class="hint">(for this source)</span></label>
+          <select id="edit-feed-translate">
+            <option value="off">Off</option>
+            <option value="auto">Auto-translate on open</option>
+            <option value="manual">Translate on long press</option>
+          </select>
+        </div>
       </div>
       <div class="modal-footer">
         <button id="save-edit-btn" class="btn-primary">Save Changes</button>
@@ -337,6 +395,20 @@
 
   <!-- OVERLAY backdrop -->
   <div id="panel-backdrop" class="panel-backdrop hidden"></div>
+
+  <!-- ===================== TRANSLATION SHEET (slide-up) ===================== -->
+  <div id="translation-sheet" class="translation-sheet hidden" aria-label="Translation">
+    <div class="ts-header">
+      <span class="ts-lang-label">Translating…</span>
+      <button id="ts-close" class="ts-close-btn" title="Close" aria-label="Close translation">✕</button>
+    </div>
+    <div id="ts-body" class="ts-body">
+      <div id="ts-loading" class="ts-loading">
+        <div class="loading-spinner"></div>
+      </div>
+      <p id="ts-text" class="ts-text hidden"></p>
+    </div>
+  </div>
 
 </div><!-- end #app-page -->
 

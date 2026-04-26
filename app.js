@@ -135,6 +135,25 @@ let activeSection   = 'all';
 let activeLang      = 'all';
 let activeFeed      = null;
 let readerOpen      = false;
+let preferredLang   = '';  // BCP-47 code; '' = translation off
+
+// =====================================================
+// TRANSLATION CONSTANTS
+// =====================================================
+const TRANS_LANG_KEY  = 'dailybao_preferred_lang';
+const TRANS_CACHE_KEY = 'dailybao_trans_cache';
+const TRANS_CACHE_MAX = 500;
+const TRANS_SEP       = '\u0000||||\u0000';  // separator unlikely to appear in article prose
+const TRANS_LANG_NAMES = {
+  'zh-TW': '繁體中文', 'zh-CN': '简体中文', ms: 'Melayu', ja: '日本語',
+  ko: '한국어', en: 'English', es: 'Español', fr: 'Français',
+  de: 'Deutsch', ar: 'العربية', hi: 'हिन्दी', th: 'ภาษาไทย',
+  vi: 'Tiếng Việt', pt: 'Português', id: 'Bahasa Indonesia', ru: 'Русский',
+};
+const TRANS_RTL_LANGS = new Set(['ar', 'he', 'fa', 'ur']);
+const TRANS_CJK_LANGS = new Set(['zh-TW', 'zh-CN', 'ja', 'ko']);
+// Feed lang code → BCP-47
+const FEED_LANG_TO_BCP47 = { EN: 'en', '繁': 'zh-TW', '简': 'zh-CN', MY: 'ms', JP: 'ja', KR: 'ko' };
 
 // =====================================================
 // ARTICLE CACHE (localStorage)
@@ -234,14 +253,21 @@ function showApp(user) {
   avatar.src = user.photoURL || '';
   avatar.alt = user.displayName || 'User';
 
-  // Account info in settings
-  document.getElementById('account-info').innerHTML = `
+  // Account info in settings — clicking opens language/profile modal
+  const accountInfo = document.getElementById('account-info');
+  accountInfo.innerHTML = `
     <img src="${user.photoURL || ''}" alt="${user.displayName}" onerror="this.style.display='none'"/>
     <div class="account-info-text">
       <div class="account-name">${user.displayName || 'User'}</div>
       <div class="account-email">${user.email || ''}</div>
     </div>
+    <span class="account-info-edit">✎</span>
   `;
+  accountInfo.style.cursor = 'pointer';
+  accountInfo.onclick = () => {
+    closePanel('settings-panel');
+    openLangPrefModal();
+  };
 }
 
 // =====================================================
@@ -255,6 +281,7 @@ async function loadUserFeeds() {
       const data = snap.data();
       userFeeds      = data.feeds?.length ? [...data.feeds] : [...DEFAULT_FEEDS];
       userCategories = Array.isArray(data.categories) ? data.categories : [];
+      preferredLang  = data.preferredLang || localStorage.getItem(TRANS_LANG_KEY) || '';
     } else {
       // New user — show defaults in memory but do NOT write to Firestore.
       // The document is created on the first explicit feed change (add/edit/delete).
@@ -267,8 +294,10 @@ async function loadUserFeeds() {
     console.warn('Firestore unavailable, using defaults:', e.message);
     userFeeds = [...DEFAULT_FEEDS];
     userCategories = [];
+    preferredLang = localStorage.getItem(TRANS_LANG_KEY) || '';
     showToast('⚠️ Could not load your feeds from cloud — showing defaults');
   }
+  updateTranslateFieldVisibility();
   renderFeedList();
   renderTabs();
   updateSectionsDatalist();
@@ -283,6 +312,256 @@ async function saveUserFeeds() {
   } catch (e) {
     console.warn('Could not save feeds:', e.message);
   }
+}
+
+async function savePreferredLang(lang) {
+  preferredLang = lang;
+  if (lang) localStorage.setItem(TRANS_LANG_KEY, lang);
+  else localStorage.removeItem(TRANS_LANG_KEY);
+  try {
+    const ref = doc(db, 'users', currentUser.uid);
+    await setDoc(ref, { preferredLang: lang }, { merge: true });
+  } catch (e) {
+    console.warn('Could not save preferred language:', e.message);
+  }
+}
+
+// =====================================================
+// TRANSLATION SERVICE
+// =====================================================
+function loadTransCache() {
+  try { return JSON.parse(localStorage.getItem(TRANS_CACHE_KEY) || '{}'); } catch { return {}; }
+}
+
+function saveTransCache(cache) {
+  const entries = Object.entries(cache);
+  const trimmed = entries.length > TRANS_CACHE_MAX
+    ? Object.fromEntries(entries.slice(-TRANS_CACHE_MAX))
+    : cache;
+  try { localStorage.setItem(TRANS_CACHE_KEY, JSON.stringify(trimmed)); } catch {}
+}
+
+function getTransCacheKey(article, targetLang) {
+  const ts = article.date ? new Date(article.date).getTime() : 0;
+  return `${article.link}:${ts}:${targetLang}`;
+}
+
+async function translateText(text, targetLang, signal) {
+  if (!text.trim()) return text;
+  // Primary: Google Translate unofficial (best quality for CJK)
+  try {
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${targetLang}&dt=t&q=${encodeURIComponent(text)}`;
+    const r = await fetch(url, { signal, cache: 'no-store' });
+    if (r.ok) {
+      const data = await r.json();
+      const translated = data[0].map(c => c[0]).join('');
+      if (translated) return translated;
+    }
+  } catch (e) {
+    if (e.name === 'AbortError') throw e;
+  }
+  // Fallback: MyMemory
+  try {
+    const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=auto|${targetLang}`;
+    const r = await fetch(url, { signal });
+    if (r.ok) {
+      const data = await r.json();
+      if (data.responseStatus === 200 && data.responseData?.translatedText) {
+        return data.responseData.translatedText;
+      }
+    }
+  } catch (e) {
+    if (e.name === 'AbortError') throw e;
+  }
+  return text;  // return original on total failure
+}
+
+function applyTranslation(el, text) {
+  const hasRichChild = el.querySelector('a, img, strong, em, code, button');
+  if (hasRichChild) {
+    // Walk text nodes only to preserve inline markup
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    const textNodes = [];
+    let node;
+    while ((node = walker.nextNode())) {
+      if (node.textContent.trim()) textNodes.push(node);
+    }
+    if (textNodes.length === 1) textNodes[0].textContent = text;
+    // Multiple text nodes mixed with inline elements — too complex to split, leave as-is
+  } else {
+    el.textContent = text;
+  }
+}
+
+async function translateProse(container, targetLang, cacheKey, signal) {
+  const elems = [...container.querySelectorAll('p, h2, h3, li, blockquote')]
+    .filter(el => {
+      const text = el.textContent.trim();
+      if (!text || text.length < 3) return false;
+      return !el.querySelector('p, div, li, blockquote');  // skip pure containers
+    });
+  if (!elems.length) return;
+
+  // Serve from cache if available
+  const cache = loadTransCache();
+  if (cache[cacheKey]) {
+    elems.forEach((el, i) => { if (cache[cacheKey][i]) applyTranslation(el, cache[cacheKey][i]); });
+    return;
+  }
+
+  // Chunk into ~4500-char batches
+  const chunks = [];
+  let cur = [], curLen = 0;
+  for (const el of elems) {
+    const t = el.textContent.trim();
+    if (curLen + t.length > 4500 && cur.length) { chunks.push(cur); cur = []; curLen = 0; }
+    cur.push(el);
+    curLen += t.length + TRANS_SEP.length;
+  }
+  if (cur.length) chunks.push(cur);
+
+  const resultMap = {};
+  let globalIdx = 0;
+
+  for (const chunk of chunks) {
+    if (signal?.aborted) throw new DOMException('aborted', 'AbortError');
+    const joined = chunk.map(el => el.textContent.trim()).join(TRANS_SEP);
+    let translated;
+    try {
+      translated = await translateText(joined, targetLang, signal);
+    } catch (e) {
+      if (e.name === 'AbortError') throw e;
+      globalIdx += chunk.length;
+      continue;
+    }
+    const parts = translated.split(TRANS_SEP);
+    if (parts.length === chunk.length) {
+      chunk.forEach((el, j) => {
+        const t = parts[j].trim();
+        if (t) { resultMap[globalIdx + j] = t; applyTranslation(el, t); }
+      });
+    } else {
+      // Delimiter mismatch — fall back to element-by-element
+      for (let j = 0; j < chunk.length; j++) {
+        if (signal?.aborted) throw new DOMException('aborted', 'AbortError');
+        try {
+          const t = await translateText(chunk[j].textContent.trim(), targetLang, signal);
+          if (t) { resultMap[globalIdx + j] = t; applyTranslation(chunk[j], t); }
+        } catch (e) {
+          if (e.name === 'AbortError') throw e;
+        }
+      }
+    }
+    globalIdx += chunk.length;
+  }
+
+  if (Object.keys(resultMap).length) {
+    cache[cacheKey] = resultMap;
+    saveTransCache(cache);
+  }
+}
+
+function attachManualTranslateListeners(prose) {
+  if (!preferredLang) return;
+  let pressTimer = null;
+  let startX = 0, startY = 0;
+
+  const cancel = () => { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; } };
+
+  const onStart = (el, x, y) => {
+    startX = x; startY = y;
+    cancel();
+    const text = el.textContent.trim();
+    if (!text) return;
+    pressTimer = setTimeout(() => { pressTimer = null; openTranslationSheet(text); }, 600);
+  };
+
+  const onMove = (x, y) => {
+    if (Math.abs(x - startX) > 10 || Math.abs(y - startY) > 10) cancel();
+  };
+
+  // Desktop: double-click to translate
+  prose.addEventListener('dblclick', e => {
+    const el = e.target.closest('p, h2, h3, li, blockquote');
+    if (el) { cancel(); openTranslationSheet(el.textContent.trim()); }
+  });
+
+  // Desktop: long mouse-hold still works as fallback
+  prose.addEventListener('mousedown', e => {
+    const el = e.target.closest('p, h2, h3, li, blockquote');
+    if (el) onStart(el, e.clientX, e.clientY);
+  });
+  prose.addEventListener('mousemove', e => onMove(e.clientX, e.clientY));
+  prose.addEventListener('mouseup', cancel);
+  prose.addEventListener('mouseleave', cancel);
+
+  prose.addEventListener('touchstart', e => {
+    const el = e.target.closest('p, h2, h3, li, blockquote');
+    if (el) onStart(el, e.touches[0].clientX, e.touches[0].clientY);
+  }, { passive: true });
+  prose.addEventListener('touchmove', e => onMove(e.touches[0].clientX, e.touches[0].clientY), { passive: true });
+  prose.addEventListener('touchend', cancel, { passive: true });
+  prose.addEventListener('touchcancel', cancel, { passive: true });
+}
+
+function openTranslationSheet(text) {
+  const sheet   = document.getElementById('translation-sheet');
+  const loading = document.getElementById('ts-loading');
+  const textEl  = document.getElementById('ts-text');
+  const label   = sheet.querySelector('.ts-lang-label');
+
+  label.textContent = `Translated to ${TRANS_LANG_NAMES[preferredLang] || preferredLang}`;
+  loading.classList.remove('hidden');
+  textEl.classList.add('hidden');
+  textEl.textContent = '';
+  sheet.classList.remove('hidden');
+  document.body.classList.add('translation-sheet-open');
+
+  if (window._tsAbort) window._tsAbort.abort();
+  const ac = new AbortController();
+  window._tsAbort = ac;
+
+  translateText(text, preferredLang, ac.signal)
+    .then(translated => {
+      loading.classList.add('hidden');
+      textEl.textContent = translated;
+      if (TRANS_RTL_LANGS.has(preferredLang)) textEl.setAttribute('dir', 'rtl');
+      else textEl.removeAttribute('dir');
+      textEl.classList.remove('hidden');
+    })
+    .catch(e => {
+      if (e.name === 'AbortError') return;
+      loading.classList.add('hidden');
+      textEl.textContent = '⚠ Translation failed — check your connection';
+      textEl.classList.remove('hidden');
+    });
+}
+
+function closeTranslationSheet() {
+  document.getElementById('translation-sheet').classList.add('hidden');
+  document.body.classList.remove('translation-sheet-open');
+  if (window._tsAbort) { window._tsAbort.abort(); window._tsAbort = null; }
+}
+
+function updateTranslateFieldVisibility() {
+  const show = !!preferredLang;
+  document.getElementById('feed-translate-group')?.classList.toggle('hidden', !show);
+  document.getElementById('edit-translate-group')?.classList.toggle('hidden', !show);
+}
+
+function openLangPrefModal() {
+  const info = document.getElementById('profile-info');
+  if (currentUser) {
+    info.innerHTML = `
+      <img src="${currentUser.photoURL || ''}" alt="${currentUser.displayName}" onerror="this.style.display='none'"/>
+      <div class="account-info-text">
+        <div class="account-name">${currentUser.displayName || 'User'}</div>
+        <div class="account-email">${currentUser.email || ''}</div>
+      </div>
+    `;
+  }
+  document.getElementById('preferred-lang-select').value = preferredLang || '';
+  openModal('lang-pref-modal');
 }
 
 // =====================================================
@@ -975,6 +1254,37 @@ async function openReader(article) {
     startReadSession(article);
     restoreProgressScroll(article);
 
+    // Translation
+    const feed = userFeeds.find(f => f.id === article.feedId);
+    const translateMode = feed?.translate || 'off';
+    if (preferredLang && translateMode !== 'off') {
+      const prose = readerContent.querySelector('.reader-prose');
+      if (prose) {
+        const articleLangBcp = FEED_LANG_TO_BCP47[article.lang] || '';
+        const sameAsTarget = articleLangBcp && articleLangBcp === preferredLang;
+        if (!sameAsTarget) {
+          if (translateMode === 'auto') {
+            const overlay = document.createElement('div');
+            overlay.className = 'trans-overlay';
+            overlay.innerHTML = '<div class="loading-spinner"></div><span>Translating…</span>';
+            readerContent.appendChild(overlay);
+            const ac = new AbortController();
+            readSession._transAbort = ac;
+            const cacheKey = getTransCacheKey(article, preferredLang);
+            translateProse(prose, preferredLang, cacheKey, ac.signal)
+              .then(() => {
+                if (TRANS_CJK_LANGS.has(preferredLang)) prose.classList.add('is-cjk');
+                if (TRANS_RTL_LANGS.has(preferredLang)) prose.setAttribute('dir', 'rtl');
+              })
+              .catch(e => { if (e.name !== 'AbortError') showToast('⚠ Translation failed'); })
+              .finally(() => overlay.remove());
+          } else if (translateMode === 'manual') {
+            attachManualTranslateListeners(prose);
+          }
+        }
+      }
+    }
+
   } catch (e) {
     console.warn('Reader failed:', e.message);
     readerLoading.classList.add('hidden');
@@ -1130,6 +1440,8 @@ function endReadSession(opts = {}) {
   if (!opts.silent) persistProgress({ finalize: true });
   if (readSession.cleanup) readSession.cleanup();
   if (readSession.timer) clearInterval(readSession.timer);
+  if (readSession._transAbort) readSession._transAbort.abort();
+  closeTranslationSheet();
   const wasCompleted = readSession._wasCompleted;
   readSession = null;
   if (!opts.silent) syncProgressToFirestore(loadProgress());
@@ -1727,6 +2039,14 @@ async function openEditFeed(feedId) {
     ytGroup.classList.add('hidden');
   }
 
+  const transGroup = document.getElementById('edit-translate-group');
+  if (preferredLang) {
+    transGroup.classList.remove('hidden');
+    document.getElementById('edit-feed-translate').value = feed.translate || 'off';
+  } else {
+    transGroup.classList.add('hidden');
+  }
+
   const results = document.getElementById('edit-test-results');
   const status  = document.getElementById('edit-test-status');
   results.innerHTML    = '<div class="test-loading">Fetching feed...</div>';
@@ -1762,9 +2082,10 @@ document.getElementById('save-edit-btn').addEventListener('click', async () => {
   const newName = document.getElementById('edit-feed-name').value.trim();
   const updated = {
     ...userFeeds[idx],
-    name:    newName || userFeeds[idx].name,
-    section: document.getElementById('edit-feed-section').value,
-    lang:    document.getElementById('edit-feed-lang').value,
+    name:      newName || userFeeds[idx].name,
+    section:   document.getElementById('edit-feed-section').value,
+    lang:      document.getElementById('edit-feed-lang').value,
+    translate: preferredLang ? (document.getElementById('edit-feed-translate').value || 'off') : 'off',
   };
   if (updated.url.includes('youtube.com/feeds')) {
     const sel = document.querySelector('input[name="edit-yt-filter"]:checked');
@@ -2003,11 +2324,12 @@ document.getElementById('save-feed-btn').addEventListener('click', async () => {
   }
 
   const newFeed = {
-    id:      `custom-${Date.now()}`,
+    id:        `custom-${Date.now()}`,
     name,
     url,
     lang,
     section,
+    translate: preferredLang ? (document.getElementById('feed-translate').value || 'off') : 'off',
   };
 
   if (url.includes('youtube.com/feeds')) {
@@ -2148,6 +2470,16 @@ document.getElementById('user-btn').addEventListener('click', () => {
   renderContinueReading();
   openPanel('settings-panel');
 });
+
+document.getElementById('save-lang-btn').addEventListener('click', async () => {
+  const lang = document.getElementById('preferred-lang-select').value;
+  await savePreferredLang(lang);
+  updateTranslateFieldVisibility();
+  closeModal('lang-pref-modal');
+  showToast(lang ? `✓ Translate into ${TRANS_LANG_NAMES[lang] || lang}` : '✓ Translation disabled');
+});
+
+document.getElementById('ts-close').addEventListener('click', closeTranslationSheet);
 document.getElementById('reader-back-btn').addEventListener('click', () => {
   endReadSession();
   closePanel('reader-panel');

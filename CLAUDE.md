@@ -6,7 +6,7 @@ A personal news reader web app that replaces social media. Free, cloud-hosted on
 ## Tech stack
 - **Frontend**: Vanilla HTML + CSS + JS (no build tools, no framework)
 - **Auth**: Firebase Auth — Google Sign-in only
-- **Database**: Firestore — stores per-user data at `/users/{uid}` → `{ feeds: [...], categories: [...], readProgress: {...} }`. `categories` is the list of user-created section names, including empty ones that have no feeds yet. `readProgress` is the Continue Reading map (capped at 30 entries) synced for cross-device support
+- **Database**: Firestore — stores per-user data at `/users/{uid}` → `{ feeds: [...], categories: [...], readProgress: {...}, preferredLang: 'zh-TW' }`. `categories` is the list of user-created section names, including empty ones that have no feeds yet. `readProgress` is the Continue Reading map (capped at 30 entries) synced for cross-device access. `preferredLang` is BCP-47 code for the user's translation target language (null/absent = translation off)
 - **Hosting**: Firebase Hosting (`firebase deploy`)
 - **RSS fetching**: Client-side — direct fetch + 3 CORS proxies (allorigins, codetabs, cors.lol) raced with `Promise.any`, 8s timeout; rss2json.com as final fallback if all fail
 - **RSS parsing**: `rss-parser@3` loaded from jsDelivr CDN (global `RSSParser`); handles `content:encoded`, Atom `<content>`, CDATA, Media RSS. Custom fields: `content:encoded`, `media:thumbnail`, `media:content`, `yt:videoId`
@@ -15,6 +15,8 @@ A personal news reader web app that replaces social media. Free, cloud-hosted on
 - **YouTube shorts cache**: `localStorage` key `dailybao_yt_short_cache` — maps `videoId` → `isShort` boolean, populated via YouTube oEmbed thumbnail aspect ratio, capped at 2000 entries (FIFO trim)
 - **Read-progress store**: `localStorage` key `dailybao_read_progress` — maps article `link` → `{pct, scrollTop, scrollHeight, elapsedMs, lastAt, …article meta}`, 42h TTL, deleted when pct ≥ 0.95. Also synced to Firestore `readProgress` field (debounced 2s during scroll, immediate on reader close) for cross-device access. `purgeExpiredProgress()` runs on auth
 - **Podcast audio state**: `localStorage` key `dailybao_audio_state` — playback position + rate, saved every 3s during playback
+- **Translation cache**: `localStorage` key `dailybao_trans_cache` — maps `${article.link}:${pubDate.getTime()}:${targetLang}` → `{ [elemIndex]: translatedText }`, capped at 500 entries (FIFO). Including pubDate in the key invalidates cache when an article is updated
+- **Preferred language**: `localStorage` key `dailybao_preferred_lang` — BCP-47 code, mirrors Firestore `preferredLang` for offline access
 
 ## File structure
 ```
@@ -132,6 +134,18 @@ The `FIREBASE_CONFIG` object at the top of `app.js` is a placeholder. User fills
 - **YouTube shorts filter**: each YouTube feed has a `ytFilter` field on its feed object — `'all' | 'long' | 'shorts'` (default `'all'`). Set via radio group inside `#youtube-helper` (add modal) and `#edit-yt-filter-group` (edit modal); only visible when the URL includes `youtube.com/feeds`
 - Shorts are detected by `getYtIsShort(videoId)` — calls YouTube oEmbed (`https://www.youtube.com/oembed?url=…&format=json`) and checks `thumbnail_height > thumbnail_width`. Results cached in localStorage (see Tech stack). `null` return means unknown → kept when filtering long-form (so detection misses don't vanish) but dropped when filtering shorts-only
 - `applyYtFilter(articles, feed)` runs at the end of `parseRSS()` and `parseRss2json()` — no-op unless the feed is a YouTube feed with `ytFilter !== 'all'`
+
+## Translation feature
+
+- **User language preference**: stored in Firestore `preferredLang` + mirrored in `localStorage`. Set via clicking the profile block (name/email row) inside the settings panel → `#lang-pref-modal` pops up with a language dropdown. `preferredLang` is a BCP-47 code (e.g. `zh-TW`, `ms`, `ja`)
+- **Per-source translation mode**: each feed has a `translate` field — `'off' | 'auto' | 'manual'` (default `'off'`). Set in Add/Edit feed modals; the field is hidden when `preferredLang` is not set
+- **Auto-translate** (`feed.translate === 'auto'`): after `cleanReaderContent()` renders prose into `#reader-content`, a `.trans-overlay` loading indicator appears while `translateProse()` runs. All `p`, `h2`, `h3`, `li`, `blockquote` elements are collected, batched into ≤4500-char chunks joined with `TRANS_SEP` (`\u0000||||\u0000`), sent to the translation API, then split back and applied. On delimiter mismatch, falls back to element-by-element translation. Aborted via `readSession._transAbort` (AbortController) when reader closes
+- **Manual translate** (`feed.translate === 'manual'`): `attachManualTranslateListeners(prose)` is called after content renders. **Double-click** a paragraph on desktop; **long-press (600ms)** on mobile/touch. Triggers `openTranslationSheet(text)` → `#translation-sheet` slides up from the bottom with the translated paragraph
+- **Translation API**: Google Translate unofficial (`translate.googleapis.com/translate_a/single?client=gtx`) as primary (best CJK quality, no API key). Falls back to MyMemory (`api.mymemory.translated.net`) on failure. Both calls use the reader's `AbortController` signal
+- **Translation sheet** (`#translation-sheet`): fixed-position slide-up panel (z-index 1100, below audio player at 1200). Closes via ✕ button or when `endReadSession()` fires. Offset upward by 7rem when `body.audio-active` so it clears the podcast bar
+- **`applyTranslation(el, text)`**: replaces `textContent` for plain elements; walks text nodes only when the element contains `<a>`, `<strong>`, `<em>` etc. to preserve inline markup
+- **Language guards**: skips translation if `FEED_LANG_TO_BCP47[article.lang] === preferredLang` (article already in target language). Adds `is-cjk` class to `.reader-prose` after translating into CJK langs; adds `dir="rtl"` for Arabic/Hebrew/Farsi/Urdu
+- **`TRANS_LANG_NAMES`** map in `app.js` — BCP-47 → display name for UI labels
 
 ## Feed debug log
 - `feedLogs` array in `app.js` records per-feed OK/error with timestamp on every fetch
