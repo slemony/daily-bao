@@ -1879,89 +1879,132 @@ body.audio-active .reader-body { padding-bottom: 7rem; }
 .modal-card-narrow { max-width: 380px; }
 
 /* =====================================================
-   TRANSLATION SHEET (slide-up panel)
+   INLINE TRANSLATION
    ===================================================== */
-.translation-sheet {
-  position: fixed;
+
+/* Hover outline — signals "double-click / long-press to translate" */
+.reader-prose.trans-enabled p,
+.reader-prose.trans-enabled h2,
+.reader-prose.trans-enabled h3,
+.reader-prose.trans-enabled h4,
+.reader-prose.trans-enabled li,
+.reader-prose.trans-enabled blockquote,
+.reader-prose.trans-enabled div:not(:has(p, div, li, blockquote)) {
+  cursor: pointer;
+  border-radius: 4px;
+  transition: outline-color 0.15s ease, background 0.15s ease;
+  outline: 1.5px dashed transparent;
+  outline-offset: 3px;
+}
+.reader-prose.trans-enabled p:hover,
+.reader-prose.trans-enabled h2:hover,
+.reader-prose.trans-enabled h3:hover,
+.reader-prose.trans-enabled h4:hover,
+.reader-prose.trans-enabled li:hover,
+.reader-prose.trans-enabled blockquote:hover,
+.reader-prose.trans-enabled div:not(:has(p, div, li, blockquote)):hover {
+  outline-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: color-mix(in srgb, var(--accent) 4%, transparent);
+}
+
+/* Long-press progress sweep — thin accent line creeps across the bottom */
+.trans-pressing {
+  position: relative;
+  outline-color: color-mix(in srgb, var(--accent) 70%, transparent) !important;
+  background: color-mix(in srgb, var(--accent) 8%, transparent) !important;
+}
+.trans-pressing::after {
+  content: '';
+  position: absolute;
+  bottom: -2px;
   left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 1100;
-  background: var(--bg-surface);
-  border-top: 1px solid var(--border-strong);
-  border-radius: 20px 20px 0 0;
-  box-shadow: 0 -8px 32px var(--shadow);
-  max-height: 50vh;
-  display: flex;
-  flex-direction: column;
-  transform: translate3d(0, 0, 0);
-  animation: ts-slide-in 0.28s cubic-bezier(0.32, 0.72, 0, 1);
+  height: 2px;
+  width: 0;
+  background: var(--accent);
+  border-radius: 2px;
+  animation: trans-press-sweep 0.6s linear forwards;
 }
-.translation-sheet.hidden { display: none; }
-
-@keyframes ts-slide-in {
-  from { transform: translateY(100%); }
-  to   { transform: translateY(0); }
+@keyframes trans-press-sweep {
+  from { width: 0; }
+  to   { width: 100%; }
 }
 
-.ts-header {
+/* Inline translation block that appears below the paragraph */
+.trans-inline {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.32s cubic-bezier(0.4, 0, 0.2, 1),
+              opacity 0.2s ease;
+  opacity: 0;
+  margin: 0.15rem 0 0.6rem;
+  border-left: 3px solid var(--accent);
+  border-radius: 0 6px 6px 0;
+  background: color-mix(in srgb, var(--accent) 7%, var(--bg-elevated));
+}
+.trans-inline.trans-inline-open {
+  max-height: 600px;
+  opacity: 1;
+}
+
+/* Kill hover/press styles for everything inside the translation block */
+.reader-prose .trans-inline,
+.reader-prose .trans-inline * {
+  cursor: default !important;
+  outline: none !important;
+}
+.reader-prose .trans-inline:hover,
+.reader-prose .trans-inline *:hover {
+  background: transparent !important;
+  outline: none !important;
+}
+
+.trans-inline-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.9rem 1.2rem 0.7rem;
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
+  padding: 0.4rem 0.65rem 0.25rem;
 }
-
-.ts-lang-label {
-  font-size: 0.78rem;
+.trans-inline-label {
+  font-size: 0.67rem;
   font-weight: 700;
-  color: var(--text-muted);
+  color: var(--accent);
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.07em;
 }
-
-.ts-close-btn {
-  background: var(--bg-elevated);
+.trans-inline-close {
+  background: none;
   border: none;
-  color: var(--text-muted);
+  color: var(--text-dim);
   cursor: pointer;
-  font-size: 0.85rem;
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  font-size: 0.72rem;
+  padding: 0.1rem 0.3rem;
+  border-radius: 4px;
+  line-height: 1;
   transition: background var(--transition), color var(--transition);
 }
-.ts-close-btn:hover { background: var(--bg-hover); color: var(--text); }
+.trans-inline-close:hover { background: var(--bg-hover); color: var(--text); }
 
-.ts-body {
-  flex: 1;
-  overflow-y: auto;
-  padding: 1rem 1.2rem 1.4rem;
+.trans-inline-body { padding: 0 0.75rem 0.65rem; }
+
+.trans-inline-loading {
   display: flex;
-  flex-direction: column;
-  align-items: center;
   justify-content: center;
-  gap: 0.75rem;
+  padding: 0.6rem 0;
 }
 
-.ts-loading {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 1rem;
+/* Smaller spinner variant for inline use */
+.loading-spinner-sm {
+  width: 18px;
+  height: 18px;
+  border-width: 2px;
 }
 
-.ts-text {
+.trans-inline-text {
   font-family: var(--font-serif-body);
-  font-size: 1.05rem;
-  line-height: 1.7;
+  font-size: 0.95rem;
+  line-height: 1.65;
   color: var(--text);
   margin: 0;
-  width: 100%;
 }
 
 /* Auto-translate loading overlay inside reader */
@@ -1983,10 +2026,6 @@ body.audio-active .reader-body { padding-bottom: 7rem; }
   font-size: 0.85rem;
   color: var(--text-muted);
 }
-
-/* Body offset when translation sheet is open (above audio player if active) */
-body.translation-sheet-open .reader-body { padding-bottom: calc(50vh + 1rem); }
-body.translation-sheet-open.audio-active .translation-sheet { bottom: 7rem; }
 
 /* =====================================================
    RESPONSIVE

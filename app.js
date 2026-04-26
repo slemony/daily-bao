@@ -394,7 +394,7 @@ function applyTranslation(el, text) {
 }
 
 async function translateProse(container, targetLang, cacheKey, signal) {
-  const elems = [...container.querySelectorAll('p, h2, h3, li, blockquote')]
+  const elems = [...container.querySelectorAll('p, h2, h3, h4, li, blockquote, div')]
     .filter(el => {
       const text = el.textContent.trim();
       if (!text || text.length < 3) return false;
@@ -463,32 +463,63 @@ async function translateProse(container, targetLang, cacheKey, signal) {
 
 function attachManualTranslateListeners(prose) {
   if (!preferredLang) return;
+  prose.classList.add('trans-enabled');
+
   let pressTimer = null;
+  let pressingEl = null;
   let startX = 0, startY = 0;
 
-  const cancel = () => { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; } };
+  const cancel = () => {
+    if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+    if (pressingEl) { pressingEl.classList.remove('trans-pressing'); pressingEl = null; }
+  };
 
   const onStart = (el, x, y) => {
     startX = x; startY = y;
     cancel();
-    const text = el.textContent.trim();
-    if (!text) return;
-    pressTimer = setTimeout(() => { pressTimer = null; openTranslationSheet(text); }, 600);
+    if (!el.textContent.trim()) return;
+    pressingEl = el;
+    el.classList.add('trans-pressing');
+    pressTimer = setTimeout(() => {
+      pressTimer = null;
+      if (pressingEl) { pressingEl.classList.remove('trans-pressing'); pressingEl = null; }
+      openInlineTranslation(el);
+    }, 600);
   };
 
   const onMove = (x, y) => {
     if (Math.abs(x - startX) > 10 || Math.abs(y - startY) > 10) cancel();
   };
 
+  const BLOCK_TAGS = new Set(['P','H1','H2','H3','H4','H5','H6','LI','BLOCKQUOTE','DIV']);
+  const pickEl = target => {
+    // Never translate the translation div itself
+    if (target.closest('.trans-inline')) return null;
+    // Walk up through inline elements (span, a, em, strong, etc.) to find block parent
+    let el = target;
+    while (el && el !== prose) {
+      if (BLOCK_TAGS.has(el.tagName)) break;
+      el = el.parentElement;
+    }
+    if (!el || el === prose) return null;
+    // Skip container divs that only wrap other block elements
+    if (el.tagName === 'DIV' && el.querySelector('p, div, li, blockquote')) return null;
+    return el.textContent.trim().length > 3 ? el : null;
+  };
+
   // Desktop: double-click to translate
   prose.addEventListener('dblclick', e => {
-    const el = e.target.closest('p, h2, h3, li, blockquote');
-    if (el) { cancel(); openTranslationSheet(el.textContent.trim()); }
+    const el = pickEl(e.target);
+    if (!el) return;
+    e.preventDefault();
+    window.getSelection()?.removeAllRanges();
+    cancel();
+    openInlineTranslation(el);
   });
 
   // Desktop: long mouse-hold still works as fallback
   prose.addEventListener('mousedown', e => {
-    const el = e.target.closest('p, h2, h3, li, blockquote');
+    const el = pickEl(e.target);
     if (el) onStart(el, e.clientX, e.clientY);
   });
   prose.addEventListener('mousemove', e => onMove(e.clientX, e.clientY));
@@ -496,7 +527,7 @@ function attachManualTranslateListeners(prose) {
   prose.addEventListener('mouseleave', cancel);
 
   prose.addEventListener('touchstart', e => {
-    const el = e.target.closest('p, h2, h3, li, blockquote');
+    const el = pickEl(e.target);
     if (el) onStart(el, e.touches[0].clientX, e.touches[0].clientY);
   }, { passive: true });
   prose.addEventListener('touchmove', e => onMove(e.touches[0].clientX, e.touches[0].clientY), { passive: true });
@@ -504,44 +535,66 @@ function attachManualTranslateListeners(prose) {
   prose.addEventListener('touchcancel', cancel, { passive: true });
 }
 
-function openTranslationSheet(text) {
-  const sheet   = document.getElementById('translation-sheet');
-  const loading = document.getElementById('ts-loading');
-  const textEl  = document.getElementById('ts-text');
-  const label   = sheet.querySelector('.ts-lang-label');
+let _activeTransEl  = null;  // paragraph that owns the current inline translation
+let _activeTransDiv = null;  // the inline .trans-inline div currently shown
 
-  label.textContent = `Translated to ${TRANS_LANG_NAMES[preferredLang] || preferredLang}`;
-  loading.classList.remove('hidden');
-  textEl.classList.add('hidden');
-  textEl.textContent = '';
-  sheet.classList.remove('hidden');
-  document.body.classList.add('translation-sheet-open');
+function openInlineTranslation(el) {
+  // Toggle off if same paragraph double-clicked again
+  if (_activeTransEl === el) { closeInlineTranslation(); return; }
+  closeInlineTranslation();
+
+  _activeTransEl = el;
+
+  const div = document.createElement('div');
+  div.className = 'trans-inline';
+  div.innerHTML = `
+    <div class="trans-inline-header">
+      <span class="trans-inline-label">🌐 ${TRANS_LANG_NAMES[preferredLang] || preferredLang}</span>
+      <button class="trans-inline-close" title="Close">✕</button>
+    </div>
+    <div class="trans-inline-body">
+      <div class="trans-inline-loading"><div class="loading-spinner loading-spinner-sm"></div></div>
+      <p class="trans-inline-text hidden"></p>
+    </div>
+  `;
+  div.querySelector('.trans-inline-close').addEventListener('click', closeInlineTranslation);
+  el.after(div);
+  _activeTransDiv = div;
+  requestAnimationFrame(() => div.classList.add('trans-inline-open'));
 
   if (window._tsAbort) window._tsAbort.abort();
   const ac = new AbortController();
   window._tsAbort = ac;
 
-  translateText(text, preferredLang, ac.signal)
+  translateText(el.textContent.trim(), preferredLang, ac.signal)
     .then(translated => {
-      loading.classList.add('hidden');
+      div.querySelector('.trans-inline-loading').remove();
+      const textEl = div.querySelector('.trans-inline-text');
       textEl.textContent = translated;
       if (TRANS_RTL_LANGS.has(preferredLang)) textEl.setAttribute('dir', 'rtl');
-      else textEl.removeAttribute('dir');
       textEl.classList.remove('hidden');
     })
     .catch(e => {
       if (e.name === 'AbortError') return;
-      loading.classList.add('hidden');
+      div.querySelector('.trans-inline-loading').remove();
+      const textEl = div.querySelector('.trans-inline-text');
       textEl.textContent = '⚠ Translation failed — check your connection';
       textEl.classList.remove('hidden');
     });
 }
 
-function closeTranslationSheet() {
-  document.getElementById('translation-sheet').classList.add('hidden');
-  document.body.classList.remove('translation-sheet-open');
+function closeInlineTranslation() {
   if (window._tsAbort) { window._tsAbort.abort(); window._tsAbort = null; }
+  if (_activeTransDiv) {
+    const d = _activeTransDiv;
+    _activeTransDiv = null;
+    _activeTransEl  = null;
+    d.classList.remove('trans-inline-open');
+    d.addEventListener('transitionend', () => d.remove(), { once: true });
+  }
 }
+
+function closeTranslationSheet() { closeInlineTranslation(); }
 
 function updateTranslateFieldVisibility() {
   const show = !!preferredLang;
@@ -1255,15 +1308,22 @@ async function openReader(article) {
     restoreProgressScroll(article);
 
     // Translation
-    const feed = userFeeds.find(f => f.id === article.feedId);
-    const translateMode = feed?.translate || 'off';
-    if (preferredLang && translateMode !== 'off') {
+    if (preferredLang) {
       const prose = readerContent.querySelector('.reader-prose');
       if (prose) {
+        const feed = userFeeds.find(f => f.id === article.feedId);
+        const translateMode = feed?.translate || 'off';
         const articleLangBcp = FEED_LANG_TO_BCP47[article.lang] || '';
         const sameAsTarget = articleLangBcp && articleLangBcp === preferredLang;
-        if (!sameAsTarget) {
-          if (translateMode === 'auto') {
+
+        if (!sameAsTarget && translateMode !== 'off') {
+          if (translateMode === 'manual') {
+            // Hover indicators + double-click / long-press
+            attachManualTranslateListeners(prose);
+          } else if (translateMode === 'auto') {
+            // Auto-translate full article; still allow double-click without hover indicators
+            attachManualTranslateListeners(prose);
+            prose.classList.remove('trans-enabled'); // no hover outlines in auto mode
             const overlay = document.createElement('div');
             overlay.className = 'trans-overlay';
             overlay.innerHTML = '<div class="loading-spinner"></div><span>Translating…</span>';
@@ -1278,8 +1338,6 @@ async function openReader(article) {
               })
               .catch(e => { if (e.name !== 'AbortError') showToast('⚠ Translation failed'); })
               .finally(() => overlay.remove());
-          } else if (translateMode === 'manual') {
-            attachManualTranslateListeners(prose);
           }
         }
       }
@@ -2479,7 +2537,6 @@ document.getElementById('save-lang-btn').addEventListener('click', async () => {
   showToast(lang ? `✓ Translate into ${TRANS_LANG_NAMES[lang] || lang}` : '✓ Translation disabled');
 });
 
-document.getElementById('ts-close').addEventListener('click', closeTranslationSheet);
 document.getElementById('reader-back-btn').addEventListener('click', () => {
   endReadSession();
   closePanel('reader-panel');
